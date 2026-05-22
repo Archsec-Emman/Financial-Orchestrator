@@ -1,5 +1,9 @@
-
 # Financial Orchestrator
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Archsec-Emman/Financial-Orchestrator/master/financial%20orch.png" alt="FINANCIAL ORCHESTRATOR Banner" width="800">
+</p>
+
 
 [![Language](https://img.shields.io/badge/C%2B%2B-20-blue)](https://isocpp.org/)
 [![Qt](https://img.shields.io/badge/Qt-6.8.3-brightgreen)](https://www.qt.io/)
