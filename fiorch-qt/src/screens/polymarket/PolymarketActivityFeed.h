@@ -1,0 +1,38 @@
+#pragma once
+
+#include "screens/polymarket/ExchangePresentation.h"
+#include "services/prediction/PredictionTypes.h"
+
+#include <QTableWidget>
+#include <QWidget>
+
+namespace fiorch::screens::polymarket {
+
+/// Activity feed showing recent trades for a market.
+/// Consumes unified prediction::PredictionTrade so both Polymarket and Kalshi
+/// render through the same table.
+class PolymarketActivityFeed : public QWidget {
+    Q_OBJECT
+  public:
+    explicit PolymarketActivityFeed(QWidget* parent = nullptr);
+
+    void set_trades(const QVector<fiorch::services::prediction::PredictionTrade>& trades);
+    /// Prepend a live trade (e.g. from a WebSocket feed). Keeps the cap at
+    /// 200 rows; older trades fall off the bottom. Flashes the new row
+    /// briefly in the exchange accent to draw the eye.
+    void append_trade(const fiorch::services::prediction::PredictionTrade& trade);
+    void clear();
+
+    /// Per-exchange number formatting (decimals on the price column).
+    void set_presentation(const ExchangePresentation& p);
+
+  private:
+    QTableWidget* table_ = nullptr;
+    ExchangePresentation presentation_ = ExchangePresentation::for_polymarket();
+
+    // Cached last trades so set_presentation() can re-render with the new
+    // decimal places.
+    QVector<fiorch::services::prediction::PredictionTrade> last_trades_;
+};
+
+} // namespace fiorch::screens::polymarket

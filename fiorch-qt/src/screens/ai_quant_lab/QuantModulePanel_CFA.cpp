@@ -1,0 +1,467 @@
+// src/screens/ai_quant_lab/QuantModulePanel_CFA.cpp
+//
+// CFA Quant panel — 8 analysis types. This file owns the panel layout
+// (build_cfa_quant_panel); the per-command result rendering lives in
+// QuantModulePanel_CFA_Display.cpp.
+#include "screens/ai_quant_lab/QuantModulePanel.h"
+#include "screens/ai_quant_lab/QuantModulePanel_Common.h"
+#include "screens/ai_quant_lab/QuantModulePanel_GsHelpers.h"
+#include "screens/ai_quant_lab/QuantModulePanel_Styles.h"
+
+#include "core/logging/Logger.h"
+#include "services/ai_quant_lab/AIQuantLabService.h"
+#include "services/file_manager/FileManagerService.h"
+#include "ui/theme/Theme.h"
+
+#include <QAbstractItemView>
+#include <QComboBox>
+#include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
+#include <QColor>
+#include <QHash>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QLabel>
+#include <QLineEdit>
+#include <QList>
+#include <QPair>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QSpinBox>
+#include <QStackedWidget>
+#include <QString>
+#include <QStringList>
+#include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QTextEdit>
+#include <QVBoxLayout>
+#include <QWidget>
+
+#include <algorithm>
+#include <cmath>
+#include <initializer_list>
+
+namespace fiorch::screens {
+
+using namespace fiorch::services::quant;
+using namespace fiorch::screens::quant_styles;
+using namespace fiorch::screens::quant_common;
+using namespace fiorch::screens::quant_gs_helpers;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CFA QUANT PANEL — 8 analysis types
+// ═══════════════════════════════════════════════════════════════════════════════
+
+QWidget* QuantModulePanel::build_cfa_quant_panel() {
+    auto* w = new QWidget(this);
+    auto* vl = new QVBoxLayout(w);
+    vl->setContentsMargins(16, 16, 16, 16);
+    vl->setSpacing(12);
+
+    // ── Section header ──────────────────────────────────────────────────────
+    auto* data_lbl = new QLabel(tr("DATA INPUT"), w);
+    data_lbl->setStyleSheet(QString("color:%1; font-weight:700; font-family:%2;"
+                                    "letter-spacing:1px;")
+                                .arg(module_.color.name())
+                                .arg(ui::fonts::DATA_FAMILY));
+    vl->addWidget(data_lbl);
+
+    // ── Symbol / data input ─────────────────────────────────────────────────
+    auto* symbol = new QLineEdit(w);
+    symbol->setPlaceholderText(tr("Ticker (AAPL, ^GSPC, BTC-USD) or comma-separated values"));
+    symbol->setStyleSheet(input_ss());
+    symbol->setText("AAPL");
+    text_inputs_["cfa_symbol"] = symbol;
+    vl->addWidget(build_input_row(tr("Symbol / Data"), symbol, w));
+
+    // Period / interval / column for ticker fetches
+    auto* period = new QComboBox(w);
+    period->addItems({"1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"});
+    period->setCurrentText("1y");
+    period->setStyleSheet(combo_ss());
+    combo_inputs_["cfa_period"] = period;
+    vl->addWidget(build_input_row(tr("Period (ticker only)"), period, w));
+
+    auto* interval = new QComboBox(w);
+    interval->addItems({"1d", "1wk", "1mo"});
+    interval->setStyleSheet(combo_ss());
+    combo_inputs_["cfa_interval"] = interval;
+    vl->addWidget(build_input_row(tr("Interval (ticker only)"), interval, w));
+
+    // ── Analysis selector ───────────────────────────────────────────────────
+    auto* analysis_type = new QComboBox(w);
+    const QStringList analyses = {
+        "trend_analysis", "stationarity_test", "arima_model", "forecasting",
+        "supervised_learning", "unsupervised_learning", "model_evaluation",
+        "resampling_methods", "sampling_techniques", "central_limit_theorem",
+        "sampling_error_analysis", "validate_data",
+    };
+    analysis_type->addItems(analyses);
+    analysis_type->setStyleSheet(combo_ss());
+    combo_inputs_["cfa_analysis"] = analysis_type;
+    vl->addWidget(build_input_row(tr("Analysis Type"), analysis_type, w));
+
+    // ── Per-analysis parameter stack ────────────────────────────────────────
+    auto* params_lbl = new QLabel(tr("ANALYSIS PARAMETERS"), w);
+    params_lbl->setStyleSheet(QString("color:%1; font-weight:700; font-family:%2;"
+                                      "letter-spacing:1px; margin-top:8px;")
+                                  .arg(module_.color.name())
+                                  .arg(ui::fonts::DATA_FAMILY));
+    vl->addWidget(params_lbl);
+
+    auto* stack = new QStackedWidget(w);
+    stack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    auto add_page = [&](std::initializer_list<QWidget*> rows) {
+        auto* page = new QWidget(stack);
+        auto* pv = new QVBoxLayout(page);
+        pv->setContentsMargins(0, 0, 0, 0);
+        pv->setSpacing(6);
+        for (auto* r : rows)
+            pv->addWidget(r);
+        pv->addStretch();
+        stack->addWidget(page);
+        return page;
+    };
+
+    // 0: trend_analysis — trend_type
+    {
+        auto* t = new QComboBox(stack);
+        t->addItems({"linear", "log_linear"});
+        t->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_trend_type"] = t;
+        add_page({build_input_row(tr("Trend Type"), t, stack)});
+    }
+    // 1: stationarity_test — test_type
+    {
+        auto* t = new QComboBox(stack);
+        t->addItems({"adf", "kpss"});
+        t->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_stationarity_test"] = t;
+        add_page({build_input_row(tr("Test Type"), t, stack)});
+    }
+    // 2: arima_model — order p,d,q + optional seasonal
+    {
+        auto* p = new QSpinBox(stack);
+        p->setRange(0, 10);
+        p->setValue(1);
+        p->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_arima_p"] = p;
+        auto* d = new QSpinBox(stack);
+        d->setRange(0, 3);
+        d->setValue(0);
+        d->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_arima_d"] = d;
+        auto* q = new QSpinBox(stack);
+        q->setRange(0, 10);
+        q->setValue(1);
+        q->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_arima_q"] = q;
+        add_page({
+            build_input_row(tr("AR order (p)"), p, stack),
+            build_input_row(tr("Differencing (d)"), d, stack),
+            build_input_row(tr("MA order (q)"), q, stack),
+        });
+    }
+    // 3: forecasting — horizon, method, train_size
+    {
+        auto* h = new QSpinBox(stack);
+        h->setRange(1, 252);
+        h->setValue(5);
+        h->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_forecast_horizon"] = h;
+        auto* m = new QComboBox(stack);
+        m->addItems({"simple_exponential", "holt", "holt_winters", "arima", "naive", "drift"});
+        m->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_forecast_method"] = m;
+        auto* ts = make_double_spin(0.5, 0.95, 0.8, 2, "", stack);
+        double_inputs_["cfa_forecast_train_size"] = ts;
+        add_page({
+            build_input_row(tr("Horizon (steps)"), h, stack),
+            build_input_row(tr("Method"), m, stack),
+            build_input_row(tr("Train Size"), ts, stack),
+        });
+    }
+    // 4: supervised_learning — n_lags, problem_type, algorithms
+    {
+        auto* lags = new QSpinBox(stack);
+        lags->setRange(1, 50);
+        lags->setValue(5);
+        lags->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_sup_lags"] = lags;
+        auto* pt = new QComboBox(stack);
+        pt->addItems({"regression", "classification"});
+        pt->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_sup_problem"] = pt;
+        auto* algos = new QLineEdit(stack);
+        algos->setText("ridge,random_forest");
+        algos->setPlaceholderText(tr("comma-separated: ridge,lasso,random_forest,svr,knn"));
+        algos->setStyleSheet(input_ss());
+        text_inputs_["cfa_sup_algorithms"] = algos;
+        add_page({
+            build_input_row(tr("Lag features (n_lags)"), lags, stack),
+            build_input_row(tr("Problem Type"), pt, stack),
+            build_input_row(tr("Algorithms"), algos, stack),
+        });
+    }
+    // 5: unsupervised_learning — n_lags, methods
+    {
+        auto* lags = new QSpinBox(stack);
+        lags->setRange(1, 50);
+        lags->setValue(5);
+        lags->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_unsup_lags"] = lags;
+        auto* methods = new QLineEdit(stack);
+        methods->setText("pca,kmeans");
+        methods->setPlaceholderText(tr("comma-separated: pca,kmeans,agglomerative"));
+        methods->setStyleSheet(input_ss());
+        text_inputs_["cfa_unsup_methods"] = methods;
+        add_page({
+            build_input_row(tr("Lag features (n_lags)"), lags, stack),
+            build_input_row(tr("Methods"), methods, stack),
+        });
+    }
+    // 6: model_evaluation — n_lags, model_type, cv_folds
+    {
+        auto* lags = new QSpinBox(stack);
+        lags->setRange(1, 50);
+        lags->setValue(5);
+        lags->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_eval_lags"] = lags;
+        auto* mt = new QComboBox(stack);
+        mt->addItems({"random_forest", "ridge", "lasso", "svr", "knn", "decision_tree"});
+        mt->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_eval_model"] = mt;
+        auto* cv = new QSpinBox(stack);
+        cv->setRange(2, 20);
+        cv->setValue(5);
+        cv->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_eval_cv"] = cv;
+        add_page({
+            build_input_row(tr("Lag features (n_lags)"), lags, stack),
+            build_input_row(tr("Model Type"), mt, stack),
+            build_input_row(tr("CV Folds"), cv, stack),
+        });
+    }
+    // 7: resampling_methods — methods, n_resamples
+    {
+        auto* m = new QLineEdit(stack);
+        m->setText("bootstrap,jackknife");
+        m->setPlaceholderText(tr("comma-separated: bootstrap,jackknife,permutation"));
+        m->setStyleSheet(input_ss());
+        text_inputs_["cfa_resample_methods"] = m;
+        auto* n = new QSpinBox(stack);
+        n->setRange(50, 100000);
+        n->setValue(1000);
+        n->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_resample_n"] = n;
+        add_page({
+            build_input_row(tr("Methods"), m, stack),
+            build_input_row(tr("Resamples"), n, stack),
+        });
+    }
+    // 8: sampling_techniques — sample_size, methods (population uses Symbol/Data)
+    {
+        auto* size = new QSpinBox(stack);
+        size->setRange(10, 100000);
+        size->setValue(100);
+        size->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_sampling_size"] = size;
+        auto* m = new QLineEdit(stack);
+        m->setText("simple,stratified,systematic");
+        m->setStyleSheet(input_ss());
+        text_inputs_["cfa_sampling_methods"] = m;
+        add_page({
+            build_input_row(tr("Sample Size"), size, stack),
+            build_input_row(tr("Methods"), m, stack),
+        });
+    }
+    // 9: central_limit_theorem — distribution, sample_sizes, n_samples
+    {
+        auto* dist = new QComboBox(stack);
+        dist->addItems({"exponential", "uniform", "normal", "poisson", "binomial"});
+        dist->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_clt_dist"] = dist;
+        auto* sizes = new QLineEdit(stack);
+        sizes->setText("5,10,30,100");
+        sizes->setStyleSheet(input_ss());
+        text_inputs_["cfa_clt_sizes"] = sizes;
+        auto* n = new QSpinBox(stack);
+        n->setRange(100, 100000);
+        n->setValue(1000);
+        n->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_clt_n"] = n;
+        add_page({
+            build_input_row(tr("Distribution"), dist, stack),
+            build_input_row(tr("Sample Sizes"), sizes, stack),
+            build_input_row(tr("Samples per size"), n, stack),
+        });
+    }
+    // 10: sampling_error_analysis — pop_mean, pop_std, sample_sizes, conf, n_sims
+    {
+        auto* mean = make_double_spin(-1e6, 1e6, 0.0, 4, "", stack);
+        double_inputs_["cfa_serr_mean"] = mean;
+        auto* sd = make_double_spin(0.0001, 1e6, 1.0, 4, "", stack);
+        double_inputs_["cfa_serr_std"] = sd;
+        auto* sizes = new QLineEdit(stack);
+        sizes->setText("10,30,50,100,500");
+        sizes->setStyleSheet(input_ss());
+        text_inputs_["cfa_serr_sizes"] = sizes;
+        auto* conf = make_double_spin(0.5, 0.999, 0.95, 3, "", stack);
+        double_inputs_["cfa_serr_conf"] = conf;
+        auto* sims = new QSpinBox(stack);
+        sims->setRange(100, 100000);
+        sims->setValue(1000);
+        sims->setStyleSheet(spinbox_ss());
+        int_inputs_["cfa_serr_sims"] = sims;
+        add_page({
+            build_input_row(tr("Population Mean"), mean, stack),
+            build_input_row(tr("Population Std"), sd, stack),
+            build_input_row(tr("Sample Sizes"), sizes, stack),
+            build_input_row(tr("Confidence Level"), conf, stack),
+            build_input_row(tr("Simulations"), sims, stack),
+        });
+    }
+    // 11: validate_data — data_type, data_name
+    {
+        auto* dt = new QComboBox(stack);
+        dt->addItems({"general", "returns", "prices", "rates"});
+        dt->setStyleSheet(combo_ss());
+        combo_inputs_["cfa_validate_type"] = dt;
+        auto* dn = new QLineEdit(stack);
+        dn->setText("data");
+        dn->setStyleSheet(input_ss());
+        text_inputs_["cfa_validate_name"] = dn;
+        add_page({
+            build_input_row(tr("Data Type"), dt, stack),
+            build_input_row(tr("Data Name"), dn, stack),
+        });
+    }
+
+    vl->addWidget(stack);
+
+    // Switch stack page when analysis combo changes
+    connect(analysis_type, qOverload<int>(&QComboBox::currentIndexChanged), stack,
+            &QStackedWidget::setCurrentIndex);
+
+    // ── Run button ──────────────────────────────────────────────────────────
+    auto* run = make_run_button(tr("RUN ANALYSIS"), w);
+    connect(run, &QPushButton::clicked, this, [this]() {
+        status_label_->setText(tr("Running..."));
+        const QString cmd = combo_inputs_["cfa_analysis"]->currentText();
+        const QString raw = text_inputs_["cfa_symbol"]->text().trimmed();
+
+        QJsonObject params;
+        params["period"] = combo_inputs_["cfa_period"]->currentText();
+        params["interval"] = combo_inputs_["cfa_interval"]->currentText();
+
+        // Sample-error analysis is the only command that doesn't read from "data".
+        // Everything else reads from "data" (or "population" for sampling_techniques).
+        const bool needs_data = (cmd != "sampling_error_analysis" &&
+                                 cmd != "central_limit_theorem");
+        if (needs_data && raw.isEmpty()) {
+            display_error(tr("Please enter a ticker symbol or comma-separated values"));
+            status_label_->setText(tr("Error"));
+            return;
+        }
+        if (cmd == "sampling_techniques")
+            params["population"] = raw;
+        else if (needs_data)
+            params["data"] = raw;
+
+        auto split_csv = [](const QString& s) {
+            QJsonArray arr;
+            for (const auto& part : s.split(',', Qt::SkipEmptyParts))
+                arr.append(part.trimmed());
+            return arr;
+        };
+        auto split_csv_int = [](const QString& s) {
+            QJsonArray arr;
+            for (const auto& part : s.split(',', Qt::SkipEmptyParts)) {
+                bool ok = false;
+                int v = part.trimmed().toInt(&ok);
+                if (ok) arr.append(v);
+            }
+            return arr;
+        };
+
+        if (cmd == "trend_analysis") {
+            params["trend_type"] = combo_inputs_["cfa_trend_type"]->currentText();
+        } else if (cmd == "stationarity_test") {
+            params["test_type"] = combo_inputs_["cfa_stationarity_test"]->currentText();
+        } else if (cmd == "arima_model") {
+            QJsonArray order;
+            order.append(int_inputs_["cfa_arima_p"]->value());
+            order.append(int_inputs_["cfa_arima_d"]->value());
+            order.append(int_inputs_["cfa_arima_q"]->value());
+            params["order"] = order;
+        } else if (cmd == "forecasting") {
+            params["horizon"] = int_inputs_["cfa_forecast_horizon"]->value();
+            params["method"] = combo_inputs_["cfa_forecast_method"]->currentText();
+            params["train_size"] = double_inputs_["cfa_forecast_train_size"]->value();
+        } else if (cmd == "supervised_learning") {
+            params["n_lags"] = int_inputs_["cfa_sup_lags"]->value();
+            params["problem_type"] = combo_inputs_["cfa_sup_problem"]->currentText();
+            params["algorithms"] = split_csv(text_inputs_["cfa_sup_algorithms"]->text());
+        } else if (cmd == "unsupervised_learning") {
+            params["n_lags"] = int_inputs_["cfa_unsup_lags"]->value();
+            params["methods"] = split_csv(text_inputs_["cfa_unsup_methods"]->text());
+        } else if (cmd == "model_evaluation") {
+            params["n_lags"] = int_inputs_["cfa_eval_lags"]->value();
+            params["model_type"] = combo_inputs_["cfa_eval_model"]->currentText();
+            params["cv_folds"] = int_inputs_["cfa_eval_cv"]->value();
+        } else if (cmd == "resampling_methods") {
+            params["methods"] = split_csv(text_inputs_["cfa_resample_methods"]->text());
+            params["n_resamples"] = int_inputs_["cfa_resample_n"]->value();
+        } else if (cmd == "sampling_techniques") {
+            params["sample_size"] = int_inputs_["cfa_sampling_size"]->value();
+            params["sampling_methods"] = split_csv(text_inputs_["cfa_sampling_methods"]->text());
+        } else if (cmd == "central_limit_theorem") {
+            params["population_dist"] = combo_inputs_["cfa_clt_dist"]->currentText();
+            params["sample_sizes"] = split_csv_int(text_inputs_["cfa_clt_sizes"]->text());
+            params["n_samples"] = int_inputs_["cfa_clt_n"]->value();
+        } else if (cmd == "sampling_error_analysis") {
+            params["population_mean"] = double_inputs_["cfa_serr_mean"]->value();
+            params["population_std"] = double_inputs_["cfa_serr_std"]->value();
+            params["sample_sizes"] = split_csv_int(text_inputs_["cfa_serr_sizes"]->text());
+            params["confidence_level"] = double_inputs_["cfa_serr_conf"]->value();
+            params["n_simulations"] = int_inputs_["cfa_serr_sims"]->value();
+        } else if (cmd == "validate_data") {
+            params["data_type"] = combo_inputs_["cfa_validate_type"]->currentText();
+            params["data_name"] = text_inputs_["cfa_validate_name"]->text();
+        }
+
+        AIQuantLabService::instance().run_module("cfa_quant", cmd, params);
+    });
+    vl->addWidget(run);
+
+    // ── Results container ───────────────────────────────────────────────────
+    auto* rc = new QWidget(w);
+    results_layout_ = new QVBoxLayout(rc);
+    results_layout_->setContentsMargins(0, 8, 0, 0);
+    results_layout_->setSpacing(8);
+    vl->addWidget(rc);
+    vl->addStretch();
+
+    return w;
+}
+
+// ── CFA Quant Result Display ───────────────────────────────────────────────
+//
+// CFA Python returns a uniform envelope:
+//   { success, analysis_type,
+//     result: { value, method, parameters, metadata, calculation_time, timestamp, calculator } }
+//
+// validate_data is the exception: result is a DataQualityReport.to_dict()
+// (quality_score, issues, warnings, statistics, recommendations).
+//
+// Each command has its own card layout — same visual language as Quant
+// Reporting (gs_make_card / gs_card_row / gs_section_header). The flattened
+// 2-col fallback only runs when the shape doesn't match a known command.
+
+
+} // namespace fiorch::screens

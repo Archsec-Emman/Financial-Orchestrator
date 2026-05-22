@@ -1,0 +1,173 @@
+# ============================================================
+
+# ── CMake build output ───────────────────────────────────────
+fincept-qt/build/
+fincept-qt/build-*/
+fincept-qt/build_*/
+fincept-qt/tmpqt/
+tmpqt/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+
+# ── Compiled binaries & libraries ───────────────────────────
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.pyd
+
+# ── Qt generated files ───────────────────────────────────────
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qm
+
+# ── Python artifacts ─────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.pdm-python
+.pdm-build
+
+# ── setup.sh runtime directories ─────────────────────────────
+.qt/
+.aqt-venv/
+
+# ── IDE and editor ───────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+*.ntvs*
+*.njsproj
+*.sw?
+.DS_Store
+Thumbs.db
+agents.md
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Database files (runtime, not source) ─────────────────────
+*.db
+*.db-shm
+*.db-wal
+
+# ── Environment & secrets — NEVER commit ─────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*.pub
+
+# ── Large data / ML model files ──────────────────────────────
+*.csv
+*.bin
+*.pt
+*.onnx
+*.h5
+*.pkl
+*.pickle
+*.model
+*.weights
+
+# ── Archives ─────────────────────────────────────────────────
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ── Legacy / non-C++ build artifacts (defensive ignores) ─────
+fincept-terminal-desktop/
+fincept-cpp/
+**/target/
+*.rlib
+*.rmeta
+node_modules/
+dist-ssr/
+
+# ── Claude Code — never commit ───────────────────────────────
+.claude/
+CLAUDE.md
+fincept-qt/DESIGN_SYSTEM.md
+
+# ── Build output (uitest) ─────────────────────────────────────
+fincept-qt/uitest/build/
+
+# ── ML training artifacts ─────────────────────────────────────
+lightning_logs/
+*.ckpt
+*.yaml
+
+# ── Shell tree output files ───────────────────────────────────
+**/tree
+
+# ── Duplicate nested agents folder ───────────────────────────
+fincept-qt/scripts/agents/agents/
+
+# ── Firecrawl research artifacts ─────────────────────────────
+.firecrawl/
+
+# ── Clangd cache ─────────────────────────────────────────────
+.cache/
+fincept-qt/.cache/
+
+# ── Exchange runtime cache ────────────────────────────────────
+fincept-qt/scripts/exchange/.cache/
+
+# ── Python test + bench caches ────────────────────────────────
+.pytest_cache/
+.benchmarks/
+
+# ── Editor/refactor backups ───────────────────────────────────
+*.bak
+*.orig
+*.deleted
+*.deleted.*
+
+# ── Local SQLite databases ────────────────────────────────────
+# (*.db is already covered above; adding sqlite variants)
+*.sqlite
+*.sqlite3
+
+# ── Internal planning docs ────────────────────────────────────
+fincept-qt/docs/superpowers/
+docs/superpowers/
+
+# ── Grill-me session notes ────────────────────────────────────
+.grill-me/
+**/.grill-me/
+
+# ── Local planning docs ───────────────────────────────────────
+plans/
+**/plans/
+
+# ── Internal Crypto Center phase notes ────────────────────────
+fincept-qt/docs/CRYPTO_CENTER_PHASE_2.md
+fincept-qt/docs/CRYPTO_CENTER_PHASE_3.md
+fincept-qt/docs/CRYPTO_CENTER_PHASE_4.md
+fincept-qt/docs/CRYPTO_CENTER_PHASE_5.md
+fincept-qt/docs/CRYPTO_WALLET_CONNECT.md
+
+# ── Markdown files — only README.md is tracked ────────────────
+*.md
+!README.md
+!**/README.md

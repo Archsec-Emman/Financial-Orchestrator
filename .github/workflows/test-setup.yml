@@ -1,0 +1,82 @@
+name: Test Setup Scripts
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Test exact Cirrus CI Qt install commands on real macOS runner ──────────
+  # Run this job to validate .cirrus.yml commands before pushing to Cirrus.
+  # Uses macos-15 (Sequoia) — same OS as ghcr.io/cirruslabs/macos-runner:sequoia
+  test-cirrus-macos:
+    name: Test Cirrus Qt Install (macOS arm64)
+    runs-on: macos-15
+
+    env:
+      QT_VERSION: "6.8.3"
+      QT_MODULES: "qtcharts qtwebsockets qtmultimedia"
+      QT_INSTALL_DIR: "$HOME/Qt"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Step 1 — install build tools (mirrors brew_cache in .cirrus.yml)
+      - name: Install build tools via brew
+        run: brew install ccache ninja cmake python@3.12
+
+      # Step 2 — install Qt via aqtinstall (mirrors qt_cache in .cirrus.yml)
+      - name: Install aqtinstall
+        run: pip3 install --break-system-packages aqtinstall
+
+      - name: Install Qt ${{ env.QT_VERSION }} via aqt
+        run: |
+          aqt install-qt --outputdir "$HOME/Qt" \
+            mac desktop ${{ env.QT_VERSION }} clang_64 \
+            -m ${{ env.QT_MODULES }}
+
+      - name: Verify Qt install
+        run: |
+          QT_ROOT="$HOME/Qt/${{ env.QT_VERSION }}/macos"
+          echo "Qt root: $QT_ROOT"
+          ls "$QT_ROOT/bin/" | grep qmake
+          "$QT_ROOT/bin/qmake" --version
+          echo "Qt6::GuiPrivate check:"
+          ls "$QT_ROOT/include/QtGui/private/" | head -5
+
+      # Step 3 — configure CMake (mirrors configure_script in .cirrus.yml)
+      - name: Configure CMake
+        run: |
+          QT_ROOT="$HOME/Qt/${{ env.QT_VERSION }}/macos"
+          cmake -B fiorch-qt/build \
+            -S fiorch-qt \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFINCEPT_BUILD_INSTALLER=OFF \
+            -DDEPLOY_QT=OFF
+
+      # Step 4 — build (mirrors build_script in .cirrus.yml)
+      - name: Build
+        run: |
+          cmake --build fiorch-qt/build \
+            --config Release \
+            --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Verify binary
+        run: |
+          EXE="fiorch-qt/build/FinancialOrchestrator"
+          if [ ! -f "$EXE" ] && [ ! -d "fiorch-qt/build/FinancialOrchestrator.app" ]; then
+            echo "ERROR: binary not found"
+            find fiorch-qt/build -maxdepth 3 -name "FinancialOrchestrator*" || true
+            exit 1
+          fi
+          echo "Build succeeded"
+          file "$EXE" 2>/dev/null || file "fiorch-qt/build/FinancialOrchestrator.app/Contents/MacOS/FinancialOrchestrator"

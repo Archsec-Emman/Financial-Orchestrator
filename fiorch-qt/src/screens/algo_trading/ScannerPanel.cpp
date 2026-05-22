@@ -1,0 +1,637 @@
+// src/screens/algo_trading/ScannerPanel.cpp
+#include "screens/algo_trading/ScannerPanel.h"
+
+#include "core/logging/Logger.h"
+#include "services/algo_trading/AlgoTradingService.h"
+#include "ui/theme/Theme.h"
+
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QTableWidget>
+
+// ── Shared style constants ──────────────────────────────────────────────────
+
+namespace {
+
+inline QString kMonoFont() {
+    return QString("font-family: %1;").arg(fiorch::ui::fonts::DATA_FAMILY);
+}
+
+inline QString kLabelStyle() {
+    return QString("color: %1; font-size: %2px; font-weight: 700; letter-spacing: 0.5px; %3"
+                   " background: transparent; border: none;")
+        .arg(fiorch::ui::colors::TEXT_SECONDARY())
+        .arg(fiorch::ui::fonts::TINY)
+        .arg(kMonoFont());
+}
+
+inline QString kSectionLabel() {
+    return QString("color: %1; font-size: %2px; font-weight: 700; letter-spacing: 0.5px; %3"
+                   " background: transparent; border: none;")
+        .arg(fiorch::ui::colors::AMBER())
+        .arg(fiorch::ui::fonts::TINY)
+        .arg(kMonoFont());
+}
+
+inline QString kComboStyle() {
+    return QString("QComboBox { background: %1; color: %2; border: 1px solid %3; padding: 4px 8px;"
+                   " font-size: %4px; %5 }"
+                   "QComboBox::drop-down { border: none; }"
+                   "QComboBox QAbstractItemView { background: %1; color: %2; border: 1px solid %3;"
+                   " selection-background-color: %6; %5 }")
+        .arg(fiorch::ui::colors::BG_SURFACE(), fiorch::ui::colors::TEXT_PRIMARY(), fiorch::ui::colors::BORDER_DIM())
+        .arg(fiorch::ui::fonts::SMALL)
+        .arg(kMonoFont())
+        .arg(fiorch::ui::colors::BG_HOVER());
+}
+
+inline QString kSpinStyle() {
+    return QString("QDoubleSpinBox { background: %1; color: %2; border: 1px solid %3; padding: 4px 8px;"
+                   " font-size: %4px; %5 }"
+                   "QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 14px; }"
+                   "QSpinBox { background: %1; color: %2; border: 1px solid %3; padding: 4px 8px;"
+                   " font-size: %4px; %5 }"
+                   "QSpinBox::up-button, QSpinBox::down-button { width: 14px; }")
+        .arg(fiorch::ui::colors::BG_SURFACE(), fiorch::ui::colors::TEXT_PRIMARY(), fiorch::ui::colors::BORDER_DIM())
+        .arg(fiorch::ui::fonts::SMALL)
+        .arg(kMonoFont());
+}
+
+inline QString kTextEditStyle() {
+    return QString("QTextEdit { background: %1; border: 1px solid %2; color: %3; padding: 6px;"
+                   " font-size: %4px; %5 }"
+                   "QTextEdit:focus { border-color: %6; }")
+        .arg(fiorch::ui::colors::BG_SURFACE(), fiorch::ui::colors::BORDER_DIM(), fiorch::ui::colors::TEXT_PRIMARY())
+        .arg(fiorch::ui::fonts::SMALL)
+        .arg(kMonoFont())
+        .arg(fiorch::ui::colors::BORDER_BRIGHT());
+}
+
+} // namespace
+
+namespace fiorch::screens {
+
+using namespace fiorch::services::algo;
+
+// ── Helper: build a condition row ───────────────────────────────────────────
+
+static QWidget* build_condition_row(QVBoxLayout* /*owner_layout*/, QWidget* parent) {
+    auto* row = new QWidget(parent);
+    row->setStyleSheet(QString("background: %1; border: 1px solid %2;")
+                           .arg(fiorch::ui::colors::BG_SURFACE(), fiorch::ui::colors::BORDER_DIM()));
+    auto* hl = new QHBoxLayout(row);
+    hl->setContentsMargins(6, 4, 6, 4);
+    hl->setSpacing(4);
+
+    // Indicator
+    auto* ind_combo = new QComboBox(row);
+    ind_combo->setStyleSheet(kComboStyle());
+    ind_combo->setFixedHeight(28);
+    ind_combo->setMinimumWidth(120);
+    const auto indicators = algo_indicators();
+    for (const auto& ind : indicators)
+        ind_combo->addItem(ind.label, ind.id);
+
+    // Field
+    auto* field_combo = new QComboBox(row);
+    field_combo->setStyleSheet(kComboStyle());
+    field_combo->setFixedHeight(28);
+    field_combo->setMinimumWidth(90);
+    QObject::connect(ind_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), row,
+                     [field_combo, indicators](int idx) {
+                         field_combo->clear();
+                         if (idx >= 0 && idx < indicators.size())
+                             field_combo->addItems(indicators[idx].fields);
+                     });
+
+    // Operator
+    auto* op_combo = new QComboBox(row);
+    op_combo->setStyleSheet(kComboStyle());
+    op_combo->setFixedHeight(28);
+    op_combo->setMinimumWidth(100);
+    op_combo->addItems(algo_operators());
+
+    // Value
+    auto* val_spin = new QDoubleSpinBox(row);
+    val_spin->setStyleSheet(kSpinStyle());
+    val_spin->setFixedHeight(28);
+    val_spin->setMinimumWidth(90);
+    val_spin->setRange(-1e9, 1e9);
+    val_spin->setDecimals(4);
+    val_spin->setValue(0);
+
+    // Remove
+    auto* rm_btn = new QPushButton("X", row);
+    rm_btn->setFixedSize(28, 28);
+    rm_btn->setCursor(Qt::PointingHandCursor);
+    rm_btn->setStyleSheet(QString("QPushButton { background: transparent; color: %1; border: 1px solid %2;"
+                                  " font-size: %3px; font-weight: 700; %4 }"
+                                  "QPushButton:hover { color: %5; border-color: %5; }")
+                              .arg(fiorch::ui::colors::TEXT_TERTIARY(), fiorch::ui::colors::BORDER_DIM())
+                              .arg(fiorch::ui::fonts::TINY)
+                              .arg(kMonoFont())
+                              .arg(fiorch::ui::colors::NEGATIVE()));
+    QObject::connect(rm_btn, &QPushButton::clicked, row, [row]() { row->deleteLater(); });
+
+    hl->addWidget(ind_combo);
+    hl->addWidget(field_combo);
+    hl->addWidget(op_combo);
+    hl->addWidget(val_spin);
+    hl->addWidget(rm_btn);
+
+    if (ind_combo->count() > 0)
+        emit ind_combo->currentIndexChanged(0);
+
+    row->setProperty("ind_combo", QVariant::fromValue(static_cast<QObject*>(ind_combo)));
+    row->setProperty("field_combo", QVariant::fromValue(static_cast<QObject*>(field_combo)));
+    row->setProperty("op_combo", QVariant::fromValue(static_cast<QObject*>(op_combo)));
+    row->setProperty("val_spin", QVariant::fromValue(static_cast<QObject*>(val_spin)));
+
+    return row;
+}
+
+static QJsonArray gather_from_layout(QVBoxLayout* layout) {
+    QJsonArray arr;
+    for (int i = 0; i < layout->count(); ++i) {
+        auto* item = layout->itemAt(i);
+        auto* row = item ? item->widget() : nullptr;
+        if (!row)
+            continue;
+
+        auto* ind_combo = qobject_cast<QComboBox*>(row->property("ind_combo").value<QObject*>());
+        auto* field_combo = qobject_cast<QComboBox*>(row->property("field_combo").value<QObject*>());
+        auto* op_combo = qobject_cast<QComboBox*>(row->property("op_combo").value<QObject*>());
+        auto* val_spin = qobject_cast<QDoubleSpinBox*>(row->property("val_spin").value<QObject*>());
+        if (!ind_combo || !field_combo || !op_combo || !val_spin)
+            continue;
+
+        QJsonObject cond;
+        cond["indicator"] = ind_combo->currentData().toString();
+        cond["field"] = field_combo->currentText();
+        cond["operator"] = op_combo->currentText();
+        cond["value"] = val_spin->value();
+        cond["params"] = QJsonObject{};
+        arr.append(cond);
+    }
+    return arr;
+}
+
+// ── Constructor ─────────────────────────────────────────────────────────────
+
+ScannerPanel::ScannerPanel(QWidget* parent) : QWidget(parent) {
+    build_ui();
+    connect_service();
+    LOG_INFO("AlgoTrading", "ScannerPanel constructed");
+}
+
+// ── Service connections ─────────────────────────────────────────────────────
+
+void ScannerPanel::connect_service() {
+    auto& svc = AlgoTradingService::instance();
+    connect(&svc, &AlgoTradingService::scan_result, this, &ScannerPanel::on_scan_result);
+    connect(&svc, &AlgoTradingService::error_occurred, this, &ScannerPanel::on_error);
+}
+
+// ── Apply preset ────────────────────────────────────────────────────────────
+
+void ScannerPanel::apply_preset(int index) {
+    // Clear existing conditions
+    while (conditions_layout_->count() > 0) {
+        auto* item = conditions_layout_->takeAt(0);
+        if (item->widget())
+            item->widget()->deleteLater();
+        delete item;
+    }
+
+    const auto presets = scanner_presets();
+    if (index <= 0 || index > presets.size())
+        return; // index 0 = "Custom"
+
+    const auto& preset = presets[index - 1];
+    const auto indicators = algo_indicators();
+
+    for (const auto& cval : preset.conditions) {
+        QJsonObject cond = cval.toObject();
+        auto* row = build_condition_row(conditions_layout_, nullptr);
+
+        auto* ind_combo = qobject_cast<QComboBox*>(row->property("ind_combo").value<QObject*>());
+        auto* op_combo = qobject_cast<QComboBox*>(row->property("op_combo").value<QObject*>());
+        auto* val_spin = qobject_cast<QDoubleSpinBox*>(row->property("val_spin").value<QObject*>());
+
+        if (ind_combo) {
+            QString ind_id = cond["indicator"].toString();
+            for (int i = 0; i < ind_combo->count(); ++i) {
+                if (ind_combo->itemData(i).toString() == ind_id) {
+                    ind_combo->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        if (op_combo) {
+            int op_idx = op_combo->findText(cond["operator"].toString());
+            if (op_idx >= 0)
+                op_combo->setCurrentIndex(op_idx);
+        }
+        if (val_spin)
+            val_spin->setValue(cond["value"].toDouble());
+
+        conditions_layout_->addWidget(row);
+    }
+
+    LOG_INFO("AlgoTrading", QString("Applied scanner preset: %1").arg(preset.name));
+}
+
+// ── Build UI ────────────────────────────────────────────────────────────────
+
+void ScannerPanel::build_ui() {
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+
+    // Scroll area
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setStyleSheet(QString("QScrollArea { background: %1; border: none; }"
+                                  "QScrollBar:vertical { background: %1; width: 6px; }"
+                                  "QScrollBar::handle:vertical { background: %2; }"
+                                  "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }")
+                              .arg(fiorch::ui::colors::BG_BASE(), fiorch::ui::colors::BORDER_MED()));
+
+    auto* content = new QWidget(this);
+    content->setStyleSheet(QString("background: %1;").arg(fiorch::ui::colors::BG_BASE()));
+    auto* main_vl = new QVBoxLayout(content);
+    main_vl->setContentsMargins(16, 12, 16, 12);
+    main_vl->setSpacing(12);
+
+    // Two-column layout
+    auto* columns = new QHBoxLayout;
+    columns->setSpacing(16);
+
+    // ── LEFT: Conditions ────────────────────────────────────────────────────
+    auto* left_col = new QWidget(content);
+    auto* left_vl = new QVBoxLayout(left_col);
+    left_vl->setContentsMargins(0, 0, 0, 0);
+    left_vl->setSpacing(8);
+
+    auto* cond_title = new QLabel("SCAN CONDITIONS", left_col);
+    cond_title->setStyleSheet(kSectionLabel());
+    left_vl->addWidget(cond_title);
+
+    // Preset selector
+    auto* preset_lbl = new QLabel("PRESET", left_col);
+    preset_lbl->setStyleSheet(kLabelStyle());
+    left_vl->addWidget(preset_lbl);
+
+    preset_combo_ = new QComboBox(left_col);
+    preset_combo_->setStyleSheet(kComboStyle());
+    preset_combo_->setFixedHeight(30);
+    preset_combo_->addItem("Custom");
+    const auto presets = scanner_presets();
+    for (const auto& p : presets)
+        preset_combo_->addItem(p.name);
+    connect(preset_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ScannerPanel::apply_preset);
+    left_vl->addWidget(preset_combo_);
+
+    // Logic combo
+    auto* logic_row = new QHBoxLayout;
+    logic_row->setSpacing(8);
+    auto* logic_lbl = new QLabel("LOGIC:", left_col);
+    logic_lbl->setStyleSheet(kLabelStyle());
+    logic_row->addWidget(logic_lbl);
+
+    logic_combo_ = new QComboBox(left_col);
+    logic_combo_->addItems({"AND", "OR"});
+    logic_combo_->setStyleSheet(kComboStyle());
+    logic_combo_->setFixedHeight(26);
+    logic_combo_->setFixedWidth(80);
+    logic_row->addWidget(logic_combo_);
+    logic_row->addStretch();
+    left_vl->addLayout(logic_row);
+
+    // Conditions container
+    auto* cond_container = new QWidget(left_col);
+    conditions_layout_ = new QVBoxLayout(cond_container);
+    conditions_layout_->setContentsMargins(0, 0, 0, 0);
+    conditions_layout_->setSpacing(4);
+    left_vl->addWidget(cond_container);
+
+    // Add condition button
+    auto* add_cond_btn = new QPushButton("+ ADD CONDITION", left_col);
+    add_cond_btn->setCursor(Qt::PointingHandCursor);
+    add_cond_btn->setFixedHeight(28);
+    add_cond_btn->setStyleSheet(QString("QPushButton { background: transparent; color: %1; border: 1px dashed %2;"
+                                        " font-size: %3px; font-weight: 700; %4 }"
+                                        "QPushButton:hover { color: %5; border-color: %5; }")
+                                    .arg(fiorch::ui::colors::TEXT_TERTIARY(), fiorch::ui::colors::BORDER_DIM())
+                                    .arg(fiorch::ui::fonts::TINY)
+                                    .arg(kMonoFont())
+                                    .arg(fiorch::ui::colors::AMBER()));
+    connect(add_cond_btn, &QPushButton::clicked, this, [this, cond_container]() {
+        conditions_layout_->addWidget(build_condition_row(conditions_layout_, cond_container));
+    });
+    left_vl->addWidget(add_cond_btn);
+    left_vl->addStretch();
+
+    columns->addWidget(left_col, 1);
+
+    // ── RIGHT: Symbols + Params ─────────────────────────────────────────────
+    auto* right_col = new QWidget(content);
+    auto* right_vl = new QVBoxLayout(right_col);
+    right_vl->setContentsMargins(0, 0, 0, 0);
+    right_vl->setSpacing(8);
+
+    auto* sym_title = new QLabel("SYMBOLS & PARAMETERS", right_col);
+    sym_title->setStyleSheet(kSectionLabel());
+    right_vl->addWidget(sym_title);
+
+    // Symbols text area
+    auto* sym_lbl = new QLabel("SYMBOLS (comma or newline separated)", right_col);
+    sym_lbl->setStyleSheet(kLabelStyle());
+    right_vl->addWidget(sym_lbl);
+
+    symbols_edit_ = new QTextEdit(right_col);
+    symbols_edit_->setStyleSheet(kTextEditStyle());
+    symbols_edit_->setFixedHeight(120);
+    symbols_edit_->setPlaceholderText("RELIANCE\nTCS\nINFY\n...");
+    right_vl->addWidget(symbols_edit_);
+
+    // Quick-add buttons
+    auto* quick_row = new QHBoxLayout;
+    quick_row->setSpacing(8);
+
+    auto* nifty_btn = new QPushButton("NIFTY 50", right_col);
+    nifty_btn->setCursor(Qt::PointingHandCursor);
+    nifty_btn->setFixedHeight(26);
+    nifty_btn->setStyleSheet(
+        QString("QPushButton { background: %1; color: %2; border: 1px solid %3;"
+                " font-size: %4px; font-weight: 700; %5 padding: 2px 10px; }"
+                "QPushButton:hover { background: %6; color: %7; }")
+            .arg(fiorch::ui::colors::BG_RAISED(), fiorch::ui::colors::TEXT_SECONDARY(), fiorch::ui::colors::BORDER_DIM())
+            .arg(fiorch::ui::fonts::TINY)
+            .arg(kMonoFont())
+            .arg(fiorch::ui::colors::BG_HOVER(), fiorch::ui::colors::TEXT_PRIMARY()));
+    connect(nifty_btn, &QPushButton::clicked, this,
+            [this]() { symbols_edit_->setPlainText(nifty50_symbols().join("\n")); });
+    quick_row->addWidget(nifty_btn);
+
+    auto* banknifty_btn = new QPushButton("BANK NIFTY", right_col);
+    banknifty_btn->setCursor(Qt::PointingHandCursor);
+    banknifty_btn->setFixedHeight(26);
+    banknifty_btn->setStyleSheet(nifty_btn->styleSheet());
+    connect(banknifty_btn, &QPushButton::clicked, this,
+            [this]() { symbols_edit_->setPlainText(bank_nifty_symbols().join("\n")); });
+    quick_row->addWidget(banknifty_btn);
+    quick_row->addStretch();
+
+    right_vl->addLayout(quick_row);
+
+    // Timeframe
+    auto* tf_lbl = new QLabel("TIMEFRAME", right_col);
+    tf_lbl->setStyleSheet(kLabelStyle());
+    right_vl->addWidget(tf_lbl);
+
+    timeframe_combo_ = new QComboBox(right_col);
+    timeframe_combo_->addItems(algo_timeframes());
+    timeframe_combo_->setStyleSheet(kComboStyle());
+    timeframe_combo_->setFixedHeight(30);
+    timeframe_combo_->setCurrentIndex(algo_timeframes().indexOf("1d"));
+    right_vl->addWidget(timeframe_combo_);
+
+    // Lookback
+    auto* lb_lbl = new QLabel("LOOKBACK (DAYS)", right_col);
+    lb_lbl->setStyleSheet(kLabelStyle());
+    right_vl->addWidget(lb_lbl);
+
+    lookback_spin_ = new QSpinBox(right_col);
+    lookback_spin_->setStyleSheet(kSpinStyle());
+    lookback_spin_->setFixedHeight(30);
+    lookback_spin_->setRange(1, 3650);
+    lookback_spin_->setValue(365);
+    right_vl->addWidget(lookback_spin_);
+
+    right_vl->addStretch();
+
+    columns->addWidget(right_col, 1);
+
+    main_vl->addLayout(columns);
+
+    // ── SCAN button ─────────────────────────────────────────────────────────
+    auto* scan_btn = new QPushButton("SCAN MARKET", content);
+    scan_btn->setCursor(Qt::PointingHandCursor);
+    scan_btn->setFixedHeight(38);
+    scan_btn->setStyleSheet(QString("QPushButton { background: rgba(255,196,0,0.1); color: #FFC400;"
+                                    " border: 1px solid #FFC400; font-size: %1px; font-weight: 700; %2"
+                                    " padding: 6px 24px; }"
+                                    "QPushButton:hover { background: #FFC400; color: %3; }")
+                                .arg(fiorch::ui::fonts::DATA)
+                                .arg(kMonoFont())
+                                .arg(fiorch::ui::colors::BG_BASE()));
+    connect(scan_btn, &QPushButton::clicked, this, &ScannerPanel::on_scan);
+    main_vl->addWidget(scan_btn);
+
+    // Status
+    status_label_ = new QLabel("", content);
+    status_label_->setWordWrap(true);
+    status_label_->setStyleSheet(QString("color: %1; font-size: %2px; %3 background: transparent; border: none;")
+                                     .arg(fiorch::ui::colors::TEXT_TERTIARY())
+                                     .arg(fiorch::ui::fonts::SMALL)
+                                     .arg(kMonoFont()));
+    main_vl->addWidget(status_label_);
+
+    // ── Results area ────────────────────────────────────────────────────────
+    auto* results_title = new QLabel("SCAN RESULTS", content);
+    results_title->setStyleSheet(kSectionLabel());
+    main_vl->addWidget(results_title);
+
+    results_table_ = new QTableWidget(0, 5, content);
+    results_table_->setHorizontalHeaderLabels({"SYMBOL", "SIGNAL", "MATCH", "TIMEFRAME", "DETAILS"});
+    results_table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    results_table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
+    results_table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
+    results_table_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
+    results_table_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    results_table_->setColumnWidth(0, 100);
+    results_table_->setColumnWidth(1, 90);
+    results_table_->setColumnWidth(2, 80);
+    results_table_->setColumnWidth(3, 90);
+    results_table_->setSortingEnabled(true);
+    results_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    results_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    results_table_->setAlternatingRowColors(true);
+    results_table_->verticalHeader()->setVisible(false);
+    results_table_->setMinimumHeight(160);
+    results_table_->setStyleSheet(
+        QString("QTableWidget { background: %1; border: 1px solid %2; gridline-color: %2;"
+                " font-size: %3px; font-family: %4; color: %5;"
+                " alternate-background-color: %6; }"
+                "QTableWidget::item { padding: 4px 8px; border: none; }"
+                "QHeaderView::section { background: %7; color: %8; font-size: %3px;"
+                " font-weight: 700; font-family: %4; padding: 4px 8px;"
+                " border: none; border-bottom: 1px solid %2; }"
+                "QTableWidget::item:selected { background: %9; color: %5; }")
+            .arg(fiorch::ui::colors::BG_BASE(), fiorch::ui::colors::BORDER_DIM())
+            .arg(fiorch::ui::fonts::SMALL)
+            .arg(fiorch::ui::fonts::DATA_FAMILY)
+            .arg(fiorch::ui::colors::TEXT_PRIMARY())
+            .arg(fiorch::ui::colors::BG_SURFACE())
+            .arg(fiorch::ui::colors::BG_RAISED())
+            .arg(fiorch::ui::colors::TEXT_TERTIARY())
+            .arg(fiorch::ui::colors::BG_HOVER()));
+    main_vl->addWidget(results_table_);
+    main_vl->addStretch();
+
+    scroll->setWidget(content);
+    root->addWidget(scroll);
+}
+
+// ── Slots ───────────────────────────────────────────────────────────────────
+
+void ScannerPanel::on_scan() {
+    QJsonArray conditions = gather_from_layout(conditions_layout_);
+    if (conditions.isEmpty()) {
+        status_label_->setText("Add at least one scan condition.");
+        status_label_->setStyleSheet(QString("color: %1; font-size: %2px; %3 background: transparent; border: none;")
+                                         .arg(fiorch::ui::colors::NEGATIVE())
+                                         .arg(fiorch::ui::fonts::SMALL)
+                                         .arg(kMonoFont()));
+        return;
+    }
+
+    // Parse symbols
+    QString raw = symbols_edit_->toPlainText().trimmed();
+    if (raw.isEmpty()) {
+        status_label_->setText("Enter symbols to scan.");
+        status_label_->setStyleSheet(QString("color: %1; font-size: %2px; %3 background: transparent; border: none;")
+                                         .arg(fiorch::ui::colors::NEGATIVE())
+                                         .arg(fiorch::ui::fonts::SMALL)
+                                         .arg(kMonoFont()));
+        return;
+    }
+
+    QStringList symbols;
+    for (const auto& line : raw.split(QRegularExpression("[,\\n\\r]+"), Qt::SkipEmptyParts)) {
+        QString s = line.trimmed().toUpper();
+        if (!s.isEmpty())
+            symbols.append(s);
+    }
+
+    status_label_->setText(QString("Scanning %1 symbols...").arg(symbols.size()));
+    status_label_->setStyleSheet(QString("color: #FFC400; font-size: %1px; %2 background: transparent; border: none;")
+                                     .arg(fiorch::ui::fonts::SMALL)
+                                     .arg(kMonoFont()));
+
+    AlgoTradingService::instance().run_scan(conditions, symbols, timeframe_combo_->currentText(),
+                                            lookback_spin_->value(), logic_combo_->currentText());
+
+    LOG_INFO("AlgoTrading",
+             QString("Scan started: %1 conditions, %2 symbols").arg(conditions.size()).arg(symbols.size()));
+}
+
+void ScannerPanel::on_scan_result(const QJsonObject& payload) {
+    results_table_->setSortingEnabled(false);
+    results_table_->setRowCount(0);
+
+    QJsonArray matches         = payload.value("matches").toArray();
+    int        total_scanned   = payload.value("total_scanned").toInt();
+    int        condition_count = payload.value("condition_count").toInt();
+
+    status_label_->setText(
+        QString("Scan complete: %1 matches out of %2 symbols").arg(matches.size()).arg(total_scanned));
+    status_label_->setStyleSheet(
+        QString("color: %1; font-size: %2px; %3 background: transparent; border: none;")
+            .arg(fiorch::ui::colors::POSITIVE())
+            .arg(fiorch::ui::fonts::SMALL)
+            .arg(kMonoFont()));
+
+    for (const auto& mval : matches) {
+        QJsonObject match         = mval.toObject();
+        QString     symbol        = match.value("symbol").toString();
+        QJsonArray  matched_conds = match.value("conditions").toArray();
+
+        // Infer signal direction from operator types
+        int bullish_count = 0, bearish_count = 0;
+        for (const auto& cv : matched_conds) {
+            QString op = cv.toObject()["operator"].toString();
+            if (op == ">" || op == ">=" || op == "crosses above")
+                ++bullish_count;
+            else if (op == "<" || op == "<=" || op == "crosses below")
+                ++bearish_count;
+        }
+        QString signal_text, signal_color;
+        if (bullish_count > 0 && bearish_count == 0) {
+            signal_text  = "BULLISH";
+            signal_color = fiorch::ui::colors::POSITIVE();
+        } else if (bearish_count > 0 && bullish_count == 0) {
+            signal_text  = "BEARISH";
+            signal_color = fiorch::ui::colors::NEGATIVE();
+        } else {
+            signal_text  = "NEUTRAL";
+            signal_color = fiorch::ui::colors::TEXT_SECONDARY();
+        }
+
+        // Build condition detail string
+        QStringList cond_strs;
+        for (const auto& cv : matched_conds) {
+            QJsonObject c = cv.toObject();
+            cond_strs.append(QString("%1 %2 %3 %4")
+                .arg(c["indicator"].toString(), c["field"].toString(),
+                     c["operator"].toString(),
+                     QString::number(c["value"].toDouble(), 'f', 2)));
+        }
+
+        int row = results_table_->rowCount();
+        results_table_->insertRow(row);
+
+        // Col 0: Symbol
+        auto* sym_item = new QTableWidgetItem(symbol);
+        sym_item->setForeground(QColor(fiorch::ui::colors::AMBER()));
+        sym_item->setFont(QFont(fiorch::ui::fonts::DATA_FAMILY(),
+                                fiorch::ui::fonts::SMALL, QFont::Bold));
+        results_table_->setItem(row, 0, sym_item);
+
+        // Col 1: Signal
+        auto* sig_item = new QTableWidgetItem(signal_text);
+        sig_item->setForeground(QColor(signal_color));
+        sig_item->setFont(QFont(fiorch::ui::fonts::DATA_FAMILY(),
+                                fiorch::ui::fonts::TINY, QFont::Bold));
+        results_table_->setItem(row, 1, sig_item);
+
+        // Col 2: Match count
+        auto* match_item = new QTableWidgetItem(
+            QString("%1/%2").arg(matched_conds.size()).arg(condition_count));
+        match_item->setForeground(QColor(fiorch::ui::colors::POSITIVE()));
+        match_item->setTextAlignment(Qt::AlignCenter);
+        results_table_->setItem(row, 2, match_item);
+
+        // Col 3: Timeframe
+        auto* tf_item = new QTableWidgetItem(timeframe_combo_->currentText().toUpper());
+        tf_item->setForeground(QColor(fiorch::ui::colors::CYAN()));
+        tf_item->setTextAlignment(Qt::AlignCenter);
+        results_table_->setItem(row, 3, tf_item);
+
+        // Col 4: Details
+        auto* detail_item = new QTableWidgetItem(cond_strs.join(" | "));
+        detail_item->setForeground(QColor(fiorch::ui::colors::TEXT_SECONDARY()));
+        results_table_->setItem(row, 4, detail_item);
+    }
+
+    results_table_->setSortingEnabled(true);
+    LOG_INFO("AlgoTrading", QString("Scan results: %1 matches").arg(matches.size()));
+}
+
+void ScannerPanel::on_error(const QString& context, const QString& msg) {
+    if (status_label_) {
+        status_label_->setText(QString("Error [%1]: %2").arg(context, msg));
+        status_label_->setStyleSheet(QString("color: %1; font-size: %2px; %3 background: transparent; border: none;")
+                                         .arg(fiorch::ui::colors::NEGATIVE())
+                                         .arg(fiorch::ui::fonts::SMALL)
+                                         .arg(kMonoFont()));
+    }
+}
+
+} // namespace fiorch::screens

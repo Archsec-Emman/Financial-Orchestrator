@@ -1,0 +1,155 @@
+name: Lint
+
+on:
+  # Manual-only — lint never runs automatically on push/tag/PR.
+  # Trigger from the Actions tab via "Run workflow".
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── clang-format ─────────────────────────────────────────────────────────────
+  clang-format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-format-18
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+
+      - name: Check formatting
+        working-directory: fiorch-qt
+        run: |
+          # Parentheses required: without them -o has lower precedence than the
+          # implicit -print, so only .h files get piped to xargs.
+          find src \( -name "*.cpp" -o -name "*.h" \) | sort | \
+            xargs clang-format --style=file --dry-run --Werror
+          echo "All files are correctly formatted."
+
+  # ── clang-tidy ───────────────────────────────────────────────────────────────
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            clang-18 clang-tidy-18 \
+            cmake ninja-build \
+            qt6-base-dev qt6-base-private-dev \
+            qt6-tools-dev qt6-tools-dev-tools \
+            qt6-charts-dev \
+            qt6-multimedia-dev libqt6multimediawidgets6 \
+            libqt6svg6-dev \
+            libqt6sql6-dev libqt6websockets6-dev \
+            libqt6concurrent6-dev libqt6printsupport6-dev \
+            libgl1-mesa-dev
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
+
+      - name: Configure (generate compile_commands.json)
+        working-directory: fiorch-qt
+        run: |
+          cmake -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DFINCEPT_BUILD_INSTALLER=OFF \
+            -DDEPLOY_QT=OFF
+
+      - name: Run clang-tidy
+        working-directory: fiorch-qt
+        run: |
+          find src -name "*.cpp" | grep -v "/moc_" | grep -v "/qrc_" | sort | \
+            xargs clang-tidy \
+              --config-file=.clang-tidy \
+              -p build \
+              --extra-arg=-std=c++20 \
+              2>&1
+          echo "clang-tidy complete."
+
+  # ── datahub-discipline ───────────────────────────────────────────────────────
+  # Enforces DataHub rules D1 and D4 (see fiorch-qt/CLAUDE.md §D):
+  #   D1 — screens must not spawn Python directly.
+  #   D4 — consumers must not call service fetch_* callbacks.
+  # If this step fails, route the offending code through DataHub. See
+  # fiorch-qt/DATAHUB_ARCHITECTURE.md §4 and docs/DATAHUB_TOPICS.md for the
+  # producer + topic you should be using instead.
+  datahub-discipline:
+    name: datahub-discipline
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check screens/ does not call PythonRunner directly
+        working-directory: fiorch-qt
+        run: |
+          if grep -rn --include='*.cpp' --include='*.h' \
+              'PythonRunner::instance()\.run(' src/screens/; then
+            echo ""
+            echo "::error::D1 violation — screens must not call PythonRunner directly."
+            echo "Route through a Producer registered with DataHub."
+            echo "See fiorch-qt/DATAHUB_ARCHITECTURE.md §4."
+            exit 1
+          fi
+          echo "D1 — screens are clean."
+
+      - name: Check screens/ does not call deprecated service fetch_* APIs
+        working-directory: fiorch-qt
+        run: |
+          # D4 exempts one-shot catalog/info APIs that have no hub topic:
+          #   MarketDataService::fetch_info, MarketDataService::fetch_news,
+          #   DBnomicsService::fetch_providers / fetch_datasets / fetch_series /
+          #   fetch_observations. See fiorch-qt/CLAUDE.md §D4 for the rule.
+          # Match any streaming fetch_* call, then grep -v the allowed ones.
+          violations=$(grep -rnE --include='*.cpp' --include='*.h' \
+              '(MarketDataService|NewsService|EconomicsService|DBnomicsService|GovDataService)::instance\(\)\.fetch_' \
+              src/screens/ \
+            | grep -vE 'MarketDataService::instance\(\)\.fetch_(info|news)\b' \
+            | grep -vE 'DBnomicsService::instance\(\)\.fetch_(providers|datasets|series|observations)\b' \
+            || true)
+          if [ -n "$violations" ]; then
+            echo "$violations"
+            echo ""
+            echo "::error::D4 violation — consumers must not call streaming fetch_* APIs."
+            echo "Use DataHub::subscribe() for live data, DataHub::peek() for snapshots."
+            echo "See fiorch-qt/DATAHUB_ARCHITECTURE.md §4 and docs/DATAHUB_TOPICS.md."
+            exit 1
+          fi
+          echo "D4 — screens are clean."
+
+  # ── cppcheck ─────────────────────────────────────────────────────────────────
+  cppcheck:
+    name: cppcheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        working-directory: fiorch-qt
+        run: |
+          cppcheck \
+            --enable=warning,performance,portability \
+            --suppressions-list=.cppcheck-suppressions \
+            --inline-suppr \
+            --std=c++20 \
+            --error-exitcode=1 \
+            -I src \
+            -j "$(nproc)" \
+            src 2>&1
+          echo "cppcheck complete."

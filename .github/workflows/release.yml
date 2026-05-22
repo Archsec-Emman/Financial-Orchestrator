@@ -1,0 +1,1791 @@
+name: Release — Build All Installers
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggered on:
+#   • git tag push  (v*)  → builds installers, creates GH Release, updates README
+#   • workflow_dispatch   → manual run (skips release + README update)
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  QT_VERSION: "6.8.3"
+  QT_MODULES: "qtcharts qtwebsockets qtmultimedia"
+  QT_IFW_VERSION: "4.7"
+  QT_IFW_TOOL: "tools_ifw"
+  APP_NAME: FinancialOrchestrator
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JOB 1 — Windows x64 Installer (QtIFW .exe)
+# ═════════════════════════════════════════════════════════════════════════════
+jobs:
+  build-windows:
+    name: Windows x64 Installer
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # ── OpenSSL dev libs ──────────────────────────────────────────────────
+      - name: Install OpenSSL
+        shell: bash
+        run: |
+          set -euo pipefail
+          VCPKG_ROOT="${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}"
+          "$VCPKG_ROOT/vcpkg" install openssl:x64-windows --no-print-usage
+          OPENSSL_DIR="$VCPKG_ROOT/installed/x64-windows"
+          echo "OPENSSL_ROOT_DIR=$OPENSSL_DIR" >> "$GITHUB_ENV"
+          ls "$OPENSSL_DIR/lib/libcrypto.lib" && echo "libcrypto.lib confirmed"
+
+      # ── Qt ────────────────────────────────────────────────────────────────
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          cache-key-prefix: qt-windows-x64-release
+
+      # ── Qt Installer Framework ────────────────────────────────────────────
+      - name: Install Qt Installer Framework
+        shell: bash
+        run: |
+          pip install aqtinstall
+          aqt install-tool windows desktop ${{ env.QT_IFW_TOOL }} \
+            --outputdir "${{ runner.temp }}/qtifw"
+          IFW_DIR="${{ runner.temp }}/qtifw/Tools/QtInstallerFramework/${{ env.QT_IFW_VERSION }}"
+          echo "QT_IFW_DIR=${IFW_DIR}" >> "$GITHUB_ENV"
+          echo "PATH=${IFW_DIR}/bin:${PATH}" >> "$GITHUB_ENV"
+
+      # ── Configure + Build ─────────────────────────────────────────────────
+      - name: Configure CMake
+        shell: bash
+        working-directory: fiorch-qt
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}" \
+            -DDEPLOY_QT=ON \
+            -DFINCEPT_BUILD_INSTALLER=ON
+
+      - name: Build
+        shell: bash
+        working-directory: fiorch-qt
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel 4
+
+      # ── Verify ───────────────────────────────────────────────────────────
+      - name: Verify binary
+        shell: bash
+        working-directory: fiorch-qt
+        run: |
+          BINARY="build/Release/${{ env.APP_NAME }}.exe"
+          [ -f "$BINARY" ] || { echo "::error::Binary not found"; exit 1; }
+          echo "Binary: $BINARY ($(du -sh "$BINARY" | cut -f1))"
+
+      # ── Deploy Qt DLLs ────────────────────────────────────────────────────
+      # Mirrors the matrix build in build-cpp.yml — both must stage the SAME
+      # set of DLLs, plugins, and resources or the installer ships a broken
+      # app. Any addition here should also go into build-cpp.yml (and vice
+      # versa). Philosophy: ship everything windeployqt might miss, even if
+      # it's redundant — a 10MB larger installer is better than a crashing app.
+      - name: Deploy Qt DLLs (windeployqt)
+        shell: bash
+        working-directory: fiorch-qt
+        run: |
+          set -euo pipefail
+          BUILD_DIR="build/Release"
+          QT_BIN="${QT_ROOT_DIR}/bin"
+          QT_PLUGINS="${QT_ROOT_DIR}/plugins"
+
+          WDQT="${QT_BIN}/windeployqt.exe"
+          [ -f "$WDQT" ] && "$WDQT" --release --no-translations --compiler-runtime \
+            --include-soft-plugins --force "${BUILD_DIR}/${{ env.APP_NAME }}.exe"
+
+          # qgeoview.dll is emitted by a FetchContent target and copied next to
+          # the exe by a POST_BUILD custom_command — confirm it's present so we
+          # catch the case where the custom_command silently failed.
+          if [ -f "${BUILD_DIR}/qgeoview.dll" ]; then
+            echo "qgeoview.dll present"
+          else
+            echo "::warning::qgeoview.dll missing from ${BUILD_DIR} — map widget will fail to load"
+          fi
+
+          # Qt Core DLLs — belt-and-suspenders for anything windeployqt misses.
+          for qt_dll in \
+            Qt6Core.dll Qt6Gui.dll Qt6Widgets.dll Qt6Charts.dll Qt6PrintSupport.dll \
+            Qt6Network.dll Qt6Sql.dll Qt6Concurrent.dll Qt6WebSockets.dll \
+            Qt6Multimedia.dll Qt6MultimediaWidgets.dll Qt6OpenGL.dll \
+            Qt6OpenGLWidgets.dll Qt6Svg.dll Qt6Xml.dll Qt6TextToSpeech.dll; do
+            [ -f "${QT_BIN}/${qt_dll}" ] && [ ! -f "${BUILD_DIR}/${qt_dll}" ] && \
+              cp "${QT_BIN}/${qt_dll}" "${BUILD_DIR}/" || true
+          done
+
+          # OpenSSL — Qt6::Network needs these for HTTPS. Qt ships them in its
+          # own bin/. Include the 1.1 names as a fallback for older Qt kits.
+          for ssl_dll in \
+            libssl-3-x64.dll libcrypto-3-x64.dll \
+            libssl-3.dll     libcrypto-3.dll \
+            libssl-1_1-x64.dll libcrypto-1_1-x64.dll; do
+            [ -f "${QT_BIN}/${ssl_dll}" ] && [ ! -f "${BUILD_DIR}/${ssl_dll}" ] && \
+              cp "${QT_BIN}/${ssl_dll}" "${BUILD_DIR}/" || true
+            [ -f "${OPENSSL_ROOT_DIR}/bin/${ssl_dll}" ] && [ ! -f "${BUILD_DIR}/${ssl_dll}" ] && \
+              cp "${OPENSSL_ROOT_DIR}/bin/${ssl_dll}" "${BUILD_DIR}/" || true
+          done
+
+          # MSVC runtime — --compiler-runtime covers most but not all VS2022 17.x
+          # DLLs (msvcp170, vcruntime140_2, vccorlib140 are sometimes missed).
+          for vcrt_dll in \
+            vcruntime140.dll vcruntime140_1.dll vcruntime140_2.dll \
+            msvcp140.dll msvcp140_1.dll msvcp140_2.dll \
+            msvcp170.dll \
+            concrt140.dll vccorlib140.dll; do
+            SYS32="/c/Windows/System32/${vcrt_dll}"
+            [ -f "$SYS32" ] && [ ! -f "${BUILD_DIR}/${vcrt_dll}" ] && \
+              cp "$SYS32" "${BUILD_DIR}/" || true
+          done
+
+          # Qt plugin directories — whole-dir copy so we pick up every provided
+          # plugin without maintaining a per-file allowlist.
+          for plugin_dir in platforms sqldrivers imageformats iconengines styles tls \
+            multimedia texttospeech networkinformation platforminputcontexts printsupport generic; do
+            [ -d "${QT_PLUGINS}/${plugin_dir}" ] && \
+              { mkdir -p "${BUILD_DIR}/${plugin_dir}"; \
+                cp -n "${QT_PLUGINS}/${plugin_dir}/"*.dll "${BUILD_DIR}/${plugin_dir}/" 2>/dev/null || true; }
+          done
+
+          # Direct3D compiler + OpenGL SW fallback — needed on VMs / headless
+          # machines without a proper GPU driver. dxcompiler/dxil: Qt 6.6+ D3D12
+          # backend (DXC shader compiler) — on Win11 boxes without WinSDK.
+          for d3d_dll in \
+            d3dcompiler_47.dll opengl32sw.dll libEGL.dll libGLESv2.dll \
+            dxcompiler.dll dxil.dll; do
+            [ -f "${QT_BIN}/${d3d_dll}" ] && [ ! -f "${BUILD_DIR}/${d3d_dll}" ] && \
+              cp "${QT_BIN}/${d3d_dll}" "${BUILD_DIR}/" || true
+          done
+
+          # ICU — Qt 6 on Windows ships its own ICU for Unicode support.
+          for icu_dll in "${QT_BIN}"/icu*.dll; do
+            base=$(basename "$icu_dll")
+            [ -f "$icu_dll" ] && [ ! -f "${BUILD_DIR}/${base}" ] && \
+              cp "$icu_dll" "${BUILD_DIR}/" || true
+          done
+
+          cp -r resources "${BUILD_DIR}/resources" 2>/dev/null || true
+          bash "${GITHUB_WORKSPACE}/.github/scripts/sync_scripts.sh" scripts "${BUILD_DIR}/scripts"
+          # qt.conf — pins plugin and data paths relative to the executable.
+          # Without this, Qt falls back to hardcoded build-time paths which
+          # don't exist on a clean machine and cause plugin load failures.
+          printf '[Paths]\nPrefix = .\nPlugins = .\nLibraries = .\n' > "${BUILD_DIR}/qt.conf"
+
+          # Fail early if anything essential didn't make it into the stage dir.
+          echo ""
+          echo "=== Staged Windows payload ==="
+          MISSING=0
+          for essential in \
+            "${{ env.APP_NAME }}.exe" \
+            Qt6Core.dll Qt6Gui.dll Qt6Widgets.dll Qt6Network.dll \
+            platforms/qwindows.dll sqldrivers/qsqlite.dll \
+            tls/qschannelbackend.dll; do
+            if [ ! -f "${BUILD_DIR}/${essential}" ]; then
+              echo "::error::Missing essential file: ${essential}"
+              MISSING=1
+            fi
+          done
+          [ "$MISSING" -eq 1 ] && exit 1
+          echo "=== $(find "${BUILD_DIR}" -type f | wc -l) files staged ==="
+
+      # ── Generate Installer ────────────────────────────────────────────────
+      - name: Generate Installer (CPack IFW)
+        shell: bash
+        working-directory: fiorch-qt/build
+        run: |
+          set -euo pipefail
+          export PATH="${QT_IFW_DIR}/bin:${PATH}"
+          command -v binarycreator || { echo "::error::binarycreator not found"; exit 1; }
+          cpack -G IFW -C ${{ env.BUILD_TYPE }} --verbose
+          ls -lh ${{ env.APP_NAME }}-*-setup* 2>/dev/null || ls -lh *.exe 2>/dev/null || true
+
+      # ── Upload ────────────────────────────────────────────────────────────
+      # Narrow the glob to the installer output — the broader `*.exe` pattern
+      # would also catch the main FinancialOrchestrator.exe binary, which we don't
+      # want to publish as a release asset (users should run the installer).
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinancialOrchestrator-Windows-x64-installer
+          path: fiorch-qt/build/FinancialOrchestrator-*-windows-x64-setup.exe
+          retention-days: 30
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JOB 2 — Linux x64 Installer (self-contained AppImage, served as .run)
+# ═════════════════════════════════════════════════════════════════════════════
+  build-linux:
+    name: Linux x64 Installer
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: linux-x64-release-${{ env.QT_VERSION }}
+          max-size: 500M
+          # update-package-index is unset: the "Install system dependencies"
+          # step below already runs apt-get update, so this action's own
+          # update is redundant and was observed to hang the runner.
+
+      # ── System deps ───────────────────────────────────────────────────────
+      # ubuntu-22.04 ships g++ 11.4 by default, but CMakeLists.txt enforces
+      # GCC 12.3+. Install gcc-12/g++-12 and pin CC/CXX for the rest of the job.
+      # We intentionally do NOT install apt Qt packages — ubuntu-22.04 ships
+      # Qt 6.2 and CMakeLists pins Qt 6.8.3 EXACT. Qt is installed via
+      # jurplel/install-qt-action below, matching the Windows and macOS jobs.
+      # We still need the XCB / GL system libs so Qt's xcb platform plugin
+      # can link at build time and load at runtime.
+      - name: Install system dependencies
+        run: |
+          sudo add-apt-repository universe -y
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            cmake ninja-build gcc-12 g++-12 \
+            libssl-dev \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libxkbcommon-dev libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-cursor-dev \
+            libxcb-icccm4 libxcb-icccm4-dev \
+            libxcb-image0  libxcb-image0-dev \
+            libxcb-keysyms1 libxcb-keysyms1-dev \
+            libxcb-randr0 \
+            libxcb-render-util0 libxcb-render-util0-dev \
+            libxcb-shape0-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xinerama0 libxcb-xinerama0-dev \
+            libxcb-xkb1 libxkbcommon-x11-dev \
+            libdbus-1-dev libfontconfig1-dev libfreetype6-dev \
+            python3 python3-pip pkg-config zip \
+            wget file libfuse2 patchelf
+          echo "CC=gcc-12"  >> "$GITHUB_ENV"
+          echo "CXX=g++-12" >> "$GITHUB_ENV"
+
+      # ── Qt 6.8.3 (matches CMakeLists' Qt6 EXACT pin) ──────────────────────
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          cache-key-prefix: qt-linux-x64-release
+
+      # ── Configure + Build ─────────────────────────────────────────────────
+      # No FINCEPT_BUILD_INSTALLER / no QtIFW on Linux — we ship an AppImage
+      # instead (see "Build AppImage" step below).
+      - name: Configure CMake
+        working-directory: fiorch-qt
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DOPENSSL_ROOT_DIR=/usr \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        working-directory: fiorch-qt
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel $(nproc)
+
+      # ── Verify ───────────────────────────────────────────────────────────
+      - name: Verify binary
+        working-directory: fiorch-qt
+        run: |
+          BINARY="build/${{ env.APP_NAME }}"
+          [ -f "$BINARY" ] || { echo "::error::Binary not found"; exit 1; }
+          echo "Binary: $BINARY ($(du -sh "$BINARY" | cut -f1))"
+          file "$BINARY"
+
+      # ── Build self-contained AppImage ─────────────────────────────────────
+      # The previous release workflow ran CPack IFW on Linux but didn't bundle
+      # Qt at all — the installer produced a "binary + desktop file" payload
+      # that crashed on every machine missing the matching apt Qt. We now ship
+      # an AppImage instead: linuxdeploy walks the binary's needed-libraries
+      # list, pulls in every transitive .so (Qt + XCB + ICU + OpenSSL + GL),
+      # patchelfs the RPATH, and bakes it all into one executable file the
+      # auto-updater can chmod+launch like a .run.
+      #
+      # Filename keeps the `-linux-x64-setup.run` suffix so it matches the
+      # regex in update-manifest (AppImage is just a self-mounting executable
+      # — the updater's "chmod +x and launch" path works identically).
+      - name: Build AppImage
+        working-directory: fiorch-qt
+        run: |
+          set -euo pipefail
+          APPDIR="build/AppDir"
+          mkdir -p "${APPDIR}/usr/bin"
+          mkdir -p "${APPDIR}/usr/share/applications"
+          mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+
+          # Stage binary + desktop entry + icon
+          cp "build/${{ env.APP_NAME }}" "${APPDIR}/usr/bin/"
+          chmod +x "${APPDIR}/usr/bin/${{ env.APP_NAME }}"
+
+          cat > "${APPDIR}/usr/share/applications/fiorch-terminal.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=Financial Orchestrator
+          Exec=FinancialOrchestrator
+          Icon=fiorch-terminal
+          Type=Application
+          Categories=Finance;
+          EOF
+
+          # Icon — linuxdeploy requires a valid PNG (it runs libpng/CImg over
+          # the file to generate scaled variants). Convert the repo's .ico to
+          # a 256x256 PNG via ImageMagick (pre-installed on ubuntu-22.04). Fall
+          # back to a generated solid-color PNG only if no source icon exists —
+          # never hand-write PNG bytes inline, ImageMagick's CRC check rejects
+          # anything with a malformed IDAT chunk.
+          ICON_DEST="${APPDIR}/usr/share/icons/hicolor/256x256/apps/fiorch-terminal.png"
+          if [ -f "resources/icons/app_icon_256.png" ]; then
+            cp "resources/icons/app_icon_256.png" "${ICON_DEST}"
+          elif [ -f "resources/fiorch.png" ]; then
+            cp "resources/fiorch.png" "${ICON_DEST}"
+          elif [ -f "resources/fiorch.ico" ]; then
+            # .ico may hold multiple frames — "ico:file[0]" selects the first,
+            # which is conventionally the largest/primary. Explicit "ico:" prefix
+            # forces the ICO decoder in case policy.xml has format detection quirks.
+            convert "ico:resources/fiorch.ico[0]" -resize 256x256 -background none -flatten "png:${ICON_DEST}"
+          else
+            # Solid-color 256x256 PNG as last resort. ImageMagick writes it
+            # with a valid IDAT + CRC, unlike an inline printf of raw bytes.
+            convert -size 256x256 xc:'#1a1a1a' "png:${ICON_DEST}"
+          fi
+
+          # Sanity check — a broken PNG here will fail the AppImage build
+          # 30 seconds later inside linuxdeploy, so fail fast with a clear error.
+          # Check: file exists, is non-empty, `file` reports PNG, and libpng's
+          # own `pngcheck`-equivalent (imagemagick `identify`) can parse it.
+          if [ ! -s "${ICON_DEST}" ]; then
+            echo "::error::Icon at ${ICON_DEST} is missing or empty"
+            ls -la "${ICON_DEST}" 2>&1 || true
+            exit 1
+          fi
+          if ! file "${ICON_DEST}" | grep -q 'PNG image data'; then
+            echo "::error::Icon at ${ICON_DEST} is not a valid PNG"
+            file "${ICON_DEST}"
+            exit 1
+          fi
+          if ! identify "${ICON_DEST}" >/dev/null 2>&1; then
+            echo "::error::Icon at ${ICON_DEST} failed ImageMagick identify — libpng will reject it"
+            identify "${ICON_DEST}" 2>&1 || true
+            exit 1
+          fi
+          echo "Icon OK: $(identify -format '%wx%h %m' "${ICON_DEST}")"
+
+          # App resources + Python analytics scripts live next to the binary
+          # (matches AppPaths resolution on Linux).
+          cp -r resources "${APPDIR}/usr/bin/resources" 2>/dev/null || true
+          bash "${GITHUB_WORKSPACE}/.github/scripts/sync_scripts.sh" scripts "${APPDIR}/usr/bin/scripts"
+
+          # Requirements files — PythonSetupManager reads these at first run.
+          mkdir -p "${APPDIR}/usr/bin/resources"
+          cp resources/requirements-numpy1.txt "${APPDIR}/usr/bin/resources/" 2>/dev/null || true
+          cp resources/requirements-numpy2.txt "${APPDIR}/usr/bin/resources/" 2>/dev/null || true
+
+          # Download linuxdeploy + Qt plugin
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+          # linuxdeploy-plugin-qt uses qmake to locate Qt. Point it at the
+          # jurplel-installed Qt 6.8.3 rather than the (absent) apt qmake6.
+          # Without this the plugin either no-ops or picks up system Qt.
+          export PATH="${QT_ROOT_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${QT_ROOT_DIR}/lib:${LD_LIBRARY_PATH:-}"
+
+          # ── Strip unused Qt SQL driver plugins ───────────────────────────
+          # We only use SQLite. linuxdeploy-plugin-qt walks every plugin in
+          # Qt's sqldrivers/ folder and tries to resolve its dependencies —
+          # the Mimer plugin pulls in libmimerapi.so, which isn't installed
+          # on the runner and causes the deploy step to fail.
+          if [ -d "${QT_ROOT_DIR}/plugins/sqldrivers" ]; then
+            rm -f "${QT_ROOT_DIR}/plugins/sqldrivers/libqsqlmimer.so" \
+                  "${QT_ROOT_DIR}/plugins/sqldrivers/libqsqlodbc.so" \
+                  "${QT_ROOT_DIR}/plugins/sqldrivers/libqsqlpsql.so" \
+                  "${QT_ROOT_DIR}/plugins/sqldrivers/libqsqlmysql.so"
+          fi
+
+          # Filename must match the regex in update-manifest:
+          #   FinancialOrchestrator-<version>-linux-x64-setup.run
+          # where <version> is CMAKE_PROJECT_VERSION (e.g. 4.0.3), NOT the
+          # tag (v4.0.3). Parse project() VERSION from CMakeLists.txt so we
+          # stay in sync even when triggered via workflow_dispatch (no tag).
+          VERSION=$(grep -Po 'project\(FinancialOrchestrator VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Could not parse project VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          echo "Package version: ${VERSION}"
+
+          # Build the AppImage. The qt plugin traces Qt plugin dependencies
+          # (platforms, sqldrivers, imageformats, tls, iconengines, svg, etc.)
+          # in addition to the core Qt libs. UPDATE_INFORMATION embeds the
+          # zsync update URL so AppImageUpdate can fetch deltas later.
+          export QMAKE="${QT_ROOT_DIR}/bin/qmake"
+          export OUTPUT="FinancialOrchestrator-${VERSION}-linux-x64-setup.run"
+          export UPDATE_INFORMATION="gh-releases-zsync|Archsec-Emman|FinancialOrchestrator|latest|FinancialOrchestrator-*-linux-x64-setup.run.zsync"
+
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir "${APPDIR}" \
+            --plugin qt \
+            --output appimage \
+            --desktop-file "${APPDIR}/usr/share/applications/fiorch-terminal.desktop" \
+            --icon-file "${ICON_DEST}" \
+            2>&1
+
+          # linuxdeploy names the output after the desktop entry — find it.
+          if [ ! -f "${OUTPUT}" ]; then
+            PRODUCED=$(find . -maxdepth 1 -name "*.AppImage" | head -1)
+            if [ -z "${PRODUCED}" ]; then
+              echo "::error::AppImage build failed — no .AppImage produced"
+              ls -la
+              exit 1
+            fi
+            mv "${PRODUCED}" "${OUTPUT}"
+          fi
+          chmod +x "${OUTPUT}"
+
+          # Sanity check — AppImage must be ≥ 50MB (bare binary is ~20MB, +Qt
+          # libs brings it to 80-150MB). A tiny AppImage means Qt wasn't bundled.
+          SIZE_KB=$(du -k "${OUTPUT}" | cut -f1)
+          if [ "${SIZE_KB}" -lt 51200 ]; then
+            echo "::error::AppImage is only ${SIZE_KB}KB — Qt libs likely not bundled"
+            exit 1
+          fi
+
+          # Stage in build/ where the upload step expects it.
+          mkdir -p build
+          mv "${OUTPUT}" "build/${OUTPUT}"
+          echo "AppImage: build/${OUTPUT} ($(du -sh "build/${OUTPUT}" | cut -f1))"
+
+          # Generate zsync file for delta updates (optional — manifest job
+          # works fine without it).
+          if command -v zsyncmake >/dev/null 2>&1; then
+            zsyncmake "build/${OUTPUT}" -o "build/${OUTPUT}.zsync" || true
+          else
+            sudo apt-get install -y zsync -qq 2>/dev/null || true
+            command -v zsyncmake >/dev/null 2>&1 && \
+              zsyncmake "build/${OUTPUT}" -o "build/${OUTPUT}.zsync" || true
+          fi
+
+      # ── Upload ────────────────────────────────────────────────────────────
+      # Version-stamped filename so update-manifest regex picks it up.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinancialOrchestrator-Linux-x64-installer
+          path: |
+            fiorch-qt/build/FinancialOrchestrator-*-linux-x64-setup.run
+            fiorch-qt/build/FinancialOrchestrator-*-linux-x64-setup.run.zsync
+          retention-days: 30
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JOB 3 — macOS arm64 Installer (DMG built with hdiutil)
+# ═════════════════════════════════════════════════════════════════════════════
+  build-macos:
+    name: macOS arm64 Installer
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: macos-arm64-release-${{ env.QT_VERSION }}
+          max-size: 500M
+
+      - name: Install build tools
+        run: brew install ninja cmake || brew upgrade ninja cmake || true
+
+      # ── Qt ────────────────────────────────────────────────────────────────
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+          cache-key-prefix: qt-macos-arm64-release
+
+      - name: Install Python 3.12
+        run: brew install python@3.12 || brew upgrade python@3.12 || true
+
+      # ── Icon ──────────────────────────────────────────────────────────────
+      - name: Generate .icns icon
+        working-directory: fiorch-qt
+        run: |
+          ICO="resources/fiorch.ico"
+          ICNS="resources/fiorch.icns"
+          if [ -f "${ICNS}" ]; then
+            echo ".icns already exists"
+          elif [ -f "${ICO}" ]; then
+            ICONSET="$(mktemp -d)/fiorch.iconset"
+            mkdir -p "${ICONSET}"
+            sips -s format png "${ICO}" --out "${ICONSET}/icon_512x512.png" \
+              --resampleHeightWidth 512 512 2>/dev/null
+            for size in 16 32 64 128 256; do
+              sips -z ${size} ${size} "${ICONSET}/icon_512x512.png" \
+                --out "${ICONSET}/icon_${size}x${size}.png" 2>/dev/null
+            done
+            cp "${ICONSET}/icon_512x512.png" "${ICONSET}/icon_256x256@2x.png"
+            sips -z 1024 1024 "${ICONSET}/icon_512x512.png" \
+              --out "${ICONSET}/icon_512x512@2x.png" 2>/dev/null
+            sips -z 64  64  "${ICONSET}/icon_512x512.png" \
+              --out "${ICONSET}/icon_32x32@2x.png" 2>/dev/null
+            sips -z 32  32  "${ICONSET}/icon_512x512.png" \
+              --out "${ICONSET}/icon_16x16@2x.png" 2>/dev/null
+            sips -z 256 256 "${ICONSET}/icon_512x512.png" \
+              --out "${ICONSET}/icon_128x128@2x.png" 2>/dev/null
+            iconutil -c icns -o "${ICNS}" "${ICONSET}"
+            echo "Generated ${ICNS}"
+          else
+            echo "WARNING: No source icon — app will use generic icon"
+          fi
+
+      # ── Configure + Build ─────────────────────────────────────────────────
+      # No FINCEPT_BUILD_INSTALLER on macOS — we ship a DMG built from the
+      # post-processed bundle (see "Generate Installer (DMG)" step below).
+      - name: Configure CMake
+        working-directory: fiorch-qt
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        working-directory: fiorch-qt
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j $(sysctl -n hw.logicalcpu)
+
+      # ── Verify ───────────────────────────────────────────────────────────
+      - name: Verify binary
+        working-directory: fiorch-qt
+        run: |
+          if [ -f "build/${{ env.APP_NAME }}" ]; then
+            BINARY="build/${{ env.APP_NAME }}"
+          elif [ -f "build/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}" ]; then
+            BINARY="build/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}"
+          else
+            echo "::error::Binary not found"
+            find build -maxdepth 3 -name "${{ env.APP_NAME }}*" || true
+            exit 1
+          fi
+          echo "Binary: $BINARY ($(du -sh "$BINARY" | cut -f1))"
+          lipo -info "$BINARY"
+
+      # ── Stage .app bundle contents (Python + resources FIRST) ─────────────
+      # Order is critical: Python.framework and resources must be in the bundle
+      # BEFORE macdeployqt / codesign run. If we embed after signing, dyld on
+      # macOS 14+ kills the process with SIGKILL (Code Signature Invalid)
+      # because the added framework pages have no signature. See issue #139.
+      - name: Stage .app bundle contents
+        working-directory: fiorch-qt
+        run: |
+          set -euxo pipefail
+          BUILD_DIR="build"
+
+          if [ -d "${BUILD_DIR}/${{ env.APP_NAME }}.app" ]; then
+            APP_BUNDLE="${BUILD_DIR}/${{ env.APP_NAME }}.app"
+          else
+            APP_BUNDLE="${BUILD_DIR}/${{ env.APP_NAME }}.app"
+            mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+            cp "${BUILD_DIR}/${{ env.APP_NAME }}" "${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
+            chmod +x "${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
+            cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>FinancialOrchestrator</string>
+            <key>CFBundleIdentifier</key><string>com.fiorch.terminal</string>
+            <key>CFBundleName</key><string>FinancialOrchestrator</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>4.0.3</string>
+            <key>CFBundleVersion</key><string>4.0.3</string>
+            <key>LSMinimumSystemVersion</key><string>13.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          fi
+
+          # CMake's POST_BUILD rule copies scripts/ + resources/ + yt-dlp
+          # into Contents/MacOS/ (portable layout for Linux/Windows builds).
+          # On macOS that's not the canonical .app layout and codesign
+          # refuses to sign any bundle with non-Mach-Os in Contents/MacOS/,
+          # so the "Canonicalise bundle layout" block further down in this
+          # step moves them into Contents/Resources/ before signing.
+          # PythonRunner::find_scripts_dir(),
+          # PythonSetupManager::find_requirements_file(), and
+          # VideoPlayerWidget::resolve_ytdlp_program() each carry an
+          # `../Resources/...` candidate so the C++ side picks up the new
+          # location after the move.
+
+          # Embed Python.framework before codesign so it's signed as part of
+          # the bundle. We use `rsync -a` (not `ditto`) because ditto under
+          # non-root breaks Versions/Current symlinks inside nested
+          # Tcl.framework / Tk.framework, which then makes codesign reject the
+          # bundle with "embedded framework contains modified or invalid
+          # version" (issue #191). The symlink layer is rebuilt explicitly
+          # below.
+          # Version is pinned to match the C++ build target. Must stay in
+          # sync with PythonRunner / PythonSetupManager in src/python/.
+          PY_VER_KEEP="3.12"
+
+          # Prefer the Homebrew-installed framework: on a fresh pour it holds
+          # exactly Versions/${PY_VER_KEEP} + Current, avoiding the multi-
+          # version mess that /Library/Frameworks/Python.framework carries on
+          # the macos-15-arm64 runner image (3.11/3.12/3.13/3.14 side-by-side).
+          # The extra-version pruning below is still done as a safety net.
+          PY_FRAMEWORK=""
+          for candidate in \
+            "$(brew --prefix python@3.12 2>/dev/null)/Frameworks/Python.framework" \
+            "/Library/Frameworks/Python.framework" \
+            "$(brew --prefix python3 2>/dev/null)/Frameworks/Python.framework"; do
+            [ -d "${candidate}/Versions" ] && { PY_FRAMEWORK="${candidate}"; break; }
+          done
+
+          BUNDLE_FRAMEWORKS="${APP_BUNDLE}/Contents/Frameworks"
+          mkdir -p "${BUNDLE_FRAMEWORKS}"
+
+          if [ -z "${PY_FRAMEWORK}" ]; then
+            echo "::warning::Python.framework not found — skipping embed step"
+          else
+            echo "Embedding Python.framework from: ${PY_FRAMEWORK}"
+            PYFW="${BUNDLE_FRAMEWORKS}/Python.framework"
+            rm -rf "${PYFW}"
+
+            # rsync -a == -rlptgoD; -l preserves symlinks as symlinks. The
+            # trailing slash on the source copies contents into the target
+            # directory. --safe-links would skip symlinks that point outside
+            # the source tree, which we want (dangling nested symlinks are
+            # cleaned separately below).
+            rsync -a "${PY_FRAMEWORK}/" "${PYFW}/"
+
+            # Strip every Python version except the one we ship. The
+            # macos-15-arm64 runner image preinstalls
+            # /Library/Frameworks/Python.framework with 3.11, 3.12, 3.13 and
+            # 3.14 side-by-side. Leaving more than one version inside the
+            # bundled framework trips `codesign --verify --strict` with
+            # "embedded framework contains modified or invalid version" —
+            # Apple's framework format expects exactly one active version
+            # plus Versions/Current. This must run BEFORE
+            # fix_framework_symlinks, otherwise Current could point at a
+            # version we are about to delete.
+            if [ ! -d "${PYFW}/Versions/${PY_VER_KEEP}" ]; then
+              echo "::error::Expected Python ${PY_VER_KEEP} under ${PYFW}/Versions/, found:"
+              ls -la "${PYFW}/Versions/" || true
+              exit 1
+            fi
+            for v in "${PYFW}/Versions/"*; do
+              name="$(basename "$v")"
+              [ "$name" = "Current" ] && continue
+              [ "$name" = "${PY_VER_KEEP}" ] && continue
+              [ -d "$v" ] || continue
+              echo "Pruning extra Python version from bundle: ${name}"
+              rm -rf "$v"
+            done
+            PY_VER="${PY_VER_KEEP}"
+            echo "Python framework version (kept): ${PY_VER}"
+
+            # Helper: rebuild the framework symlink layer for a framework dir.
+            # $1 = path to .framework; $2 = concrete version string inside
+            # Versions/. Rebuilds Versions/Current and the top-level name /
+            # Resources / Headers symlinks. Uses relative targets so the
+            # framework is relocatable.
+            fix_framework_symlinks() {
+              local fw="$1" ver="$2"
+              local fw_name
+              fw_name="$(basename "$fw" .framework)"
+              [ -d "${fw}/Versions/${ver}" ] || { echo "skip ${fw}: Versions/${ver} missing"; return 0; }
+              ( cd "${fw}/Versions" && rm -f Current && ln -s "${ver}" Current )
+              for link in "${fw_name}" Resources Headers; do
+                local target="Versions/Current/${link}"
+                if [ -e "${fw}/${target}" ] || [ -L "${fw}/${target}" ]; then
+                  ( cd "${fw}" && rm -f "${link}" && ln -s "${target}" "${link}" )
+                fi
+              done
+            }
+
+            # Fix Python.framework itself
+            fix_framework_symlinks "${PYFW}" "${PY_VER}"
+
+            # Fix any nested frameworks inside Python (Tcl, Tk, and anything
+            # else Homebrew ships). Codesign walks into these, and a broken
+            # symlink layer here is what produced the "modified or invalid
+            # version" error on the runner.
+            NESTED_ROOT="${PYFW}/Versions/${PY_VER}/Frameworks"
+            if [ -d "${NESTED_ROOT}" ]; then
+              for nested_fw in "${NESTED_ROOT}"/*.framework; do
+                [ -d "${nested_fw}" ] || continue
+                nested_ver=""
+                if [ -d "${nested_fw}/Versions" ]; then
+                  for v in "${nested_fw}/Versions/"*; do
+                    name="$(basename "$v")"
+                    [ "$name" = "Current" ] && continue
+                    [ -d "$v" ] || continue
+                    nested_ver="$name"
+                    break
+                  done
+                fi
+                [ -n "${nested_ver}" ] || { echo "skip ${nested_fw}: no version dir"; continue; }
+                fix_framework_symlinks "${nested_fw}" "${nested_ver}"
+              done
+            fi
+
+            # Strip dev-only files that shouldn't ship AND confuse codesign:
+            #   - .pyc / .pyo caches (regenerated at runtime, stale hashes fail seal)
+            #   - __pycache__ directories
+            # Run AFTER the symlink fix — otherwise find could race the rebuild.
+            find "${PYFW}" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+            find "${PYFW}" -name "*.pyc" -delete 2>/dev/null || true
+            find "${PYFW}" -name "*.pyo" -delete 2>/dev/null || true
+
+            # Remove dangling symlinks (e.g. Homebrew's PrivateHeaders often
+            # points to missing targets). `-exec test -e` resolves through
+            # symlinks, so a broken link matches `! -exec test -e`.
+            find "${PYFW}" -type l ! -exec test -e {} \; -delete 2>/dev/null || true
+
+            # Strip quarantine and extended attributes from the framework.
+            # Leftover com.apple.quarantine or com.apple.provenance xattrs on
+            # individual pages invalidate the ad-hoc signature when the DMG
+            # is copied to /Applications on macOS 14+ Apple Silicon — this is
+            # the root cause behind the SIGKILL "Code Signature Invalid"
+            # reports in issues #139, #173, #191.
+            xattr -cr "${PYFW}" 2>/dev/null || true
+
+            # Convenience symlink the C++ runtime uses to invoke the embedded
+            # python binary. Kept from the original block.
+            ln -sf "../Frameworks/Python.framework/Versions/${PY_VER}/bin/python${PY_VER}" \
+                   "${APP_BUNDLE}/Contents/MacOS/python3" 2>/dev/null || true
+            echo "Python ${PY_VER} embedded"
+
+            # Sanity-check every framework that codesign will walk into.
+            # Fail fast with a clear error here rather than blowing up 30
+            # seconds later inside `codesign --verify`.
+            for check_fw in "${PYFW}" "${NESTED_ROOT}"/*.framework; do
+              [ -d "${check_fw}" ] || continue
+              if [ ! -L "${check_fw}/Versions/Current" ]; then
+                echo "::error::${check_fw}/Versions/Current is not a symlink — codesign will reject"
+                ls -la "${check_fw}/Versions/" || true
+                exit 1
+              fi
+            done
+            echo "Python.framework structure OK"
+          fi
+
+          # Top-level Resources/ for icons (Info.plist's CFBundleIconFile
+          # is read from here).
+          mkdir -p "${APP_BUNDLE}/Contents/Resources"
+          cp -r resources "${APP_BUNDLE}/Contents/Resources/" 2>/dev/null || true
+
+          # ── Canonicalise bundle layout for codesign ──────────────────────
+          # CMake's POST_BUILD steps copy scripts/, resources/, and yt-dlp
+          # into Contents/MacOS/ (alongside the binary), which is portable
+          # to Linux/Windows where there's no .app bundle. On macOS that
+          # layout is FATAL for codesign: anything in Contents/MacOS/ that
+          # isn't a Mach-O makes codesign reject the bundle with
+          #   "code object is not signed at all
+          #    In subcomponent: .../Contents/MacOS/<...>"
+          # So we relocate the offending paths into Contents/Resources/
+          # before signing. PythonRunner / PythonSetupManager /
+          # VideoPlayerWidget all have `../Resources/...` in their
+          # candidate search lists, so the C++ side keeps working.
+          echo "Canonicalising bundle layout (moving non-Mach-O content out of MacOS/)..."
+
+          # scripts/ → Contents/Resources/scripts/  (preserve dir name)
+          if [ -d "${APP_BUNDLE}/Contents/MacOS/scripts" ]; then
+              rm -rf "${APP_BUNDLE}/Contents/Resources/scripts"
+              mv "${APP_BUNDLE}/Contents/MacOS/scripts" \
+                 "${APP_BUNDLE}/Contents/Resources/scripts"
+              echo "  moved Contents/MacOS/scripts → Contents/Resources/scripts"
+          fi
+
+          # MacOS/resources/* → Contents/Resources/  (FLATTEN — PythonSetupManager
+          # searches `../Resources/<filename>`, not `../Resources/resources/...`).
+          if [ -d "${APP_BUNDLE}/Contents/MacOS/resources" ]; then
+              rsync -a "${APP_BUNDLE}/Contents/MacOS/resources/" \
+                       "${APP_BUNDLE}/Contents/Resources/"
+              rm -rf "${APP_BUNDLE}/Contents/MacOS/resources"
+              echo "  merged Contents/MacOS/resources/* → Contents/Resources/"
+          fi
+
+          # yt-dlp → Contents/Resources/yt-dlp
+          if [ -f "${APP_BUNDLE}/Contents/MacOS/yt-dlp" ]; then
+              mv "${APP_BUNDLE}/Contents/MacOS/yt-dlp" \
+                 "${APP_BUNDLE}/Contents/Resources/yt-dlp"
+              echo "  moved Contents/MacOS/yt-dlp → Contents/Resources/yt-dlp"
+          fi
+
+          echo "Bundle staged at: ${APP_BUNDLE}"
+          echo "Pre-sign size: $(du -sh "${APP_BUNDLE}" | cut -f1)"
+          echo "=== Contents/MacOS/ top level (should be Mach-Os only) ==="
+          ls -la "${APP_BUNDLE}/Contents/MacOS/" | head -10
+          echo "=== Scripts count under Contents/Resources/scripts ==="
+          find "${APP_BUNDLE}/Contents/Resources/scripts" -type f 2>/dev/null | wc -l || true
+
+      # ── Run macdeployqt on the fully staged bundle ────────────────────────
+      # macdeployqt copies Qt frameworks, fixes rpaths, and signs everything
+      # it touches. It must run AFTER Python.framework + resources are in place
+      # so those get correct rpath treatment.
+      - name: Run macdeployqt
+        working-directory: fiorch-qt
+        run: |
+          set -euo pipefail
+          APP_BUNDLE="build/${{ env.APP_NAME }}.app"
+          MACDEPLOYQT="${QT_ROOT_DIR}/bin/macdeployqt"
+          if [ -x "${MACDEPLOYQT}" ]; then
+            echo "Running macdeployqt on ${APP_BUNDLE}"
+            # -always-overwrite keeps incremental runs idempotent on local
+            # re-runs without affecting CI (which always starts clean).
+            "${MACDEPLOYQT}" "${APP_BUNDLE}" -verbose=1 -always-overwrite || \
+              echo "::warning::macdeployqt exited non-zero — continuing to explicit codesign"
+          else
+            echo "::error::macdeployqt not found at ${MACDEPLOYQT} — bundle will be missing Qt frameworks"
+            exit 1
+          fi
+
+          # Belt-and-suspenders: if any linked dylib is still pointing outside
+          # the bundle (e.g. @rpath to /Users/runner/work/... or /opt/homebrew),
+          # the app will crash on any other machine. Copy every non-system
+          # non-bundled dylib into Frameworks/ and rewrite its install name.
+          FRAMEWORKS="${APP_BUNDLE}/Contents/Frameworks"
+          MAIN_BIN="${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
+          mkdir -p "${FRAMEWORKS}"
+
+          # Walk every Mach-O inside the bundle. For each, inspect its linked
+          # libraries; if any resolve to a path that isn't a system location
+          # (/usr/lib, /System) and isn't already inside the bundle, copy it
+          # in and rewrite the link with install_name_tool.
+          bundle_external_deps() {
+            local target="$1"
+            otool -L "$target" 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r dep; do
+              case "$dep" in
+                /usr/lib/*|/System/*|@executable_path/*|@loader_path/*|@rpath/*) ;;
+                "") ;;
+                *)
+                  if [ -f "$dep" ]; then
+                    base=$(basename "$dep")
+                    if [ ! -f "${FRAMEWORKS}/${base}" ]; then
+                      cp "$dep" "${FRAMEWORKS}/"
+                      chmod u+w "${FRAMEWORKS}/${base}"
+                      install_name_tool -id "@rpath/${base}" "${FRAMEWORKS}/${base}" 2>/dev/null || true
+                      echo "Bundled missing dep: ${base}"
+                    fi
+                    install_name_tool -change "$dep" "@rpath/${base}" "$target" 2>/dev/null || true
+                  fi
+                  ;;
+              esac
+            done
+          }
+
+          # Main binary + every dylib in Frameworks
+          bundle_external_deps "${MAIN_BIN}"
+          find "${FRAMEWORKS}" -name "*.dylib" -type f 2>/dev/null | while read -r dylib; do
+            bundle_external_deps "$dylib"
+          done
+
+          # Verify no un-bundled non-system deps remain.
+          LEAKS=$(otool -L "${MAIN_BIN}" 2>/dev/null | tail -n +2 | awk '{print $1}' | \
+            grep -vE '^(/usr/lib|/System|@executable_path|@loader_path|@rpath)' | \
+            grep -v '^$' || true)
+          if [ -n "${LEAKS}" ]; then
+            echo "::warning::Main binary still references external paths:"
+            echo "${LEAKS}"
+          else
+            echo "Main binary: no external path references"
+          fi
+
+          echo "=== Bundle Frameworks/ contents ==="
+          ls -la "${FRAMEWORKS}" | head -50
+
+          # ── Thin universal Mach-Os to arm64 ─────────────────────────────────
+          # jurplel/install-qt-action@v4 / aqtinstall ships Qt 6.x macOS as a
+          # universal (arm64+x86_64) binary — Qt 6.2+ only publishes one macOS
+          # archive labelled `clang_64` that contains both slices fused with
+          # lipo. macdeployqt copies those frameworks/plugins into the bundle
+          # untouched, which leaves ~36 fat Mach-Os in Contents/Frameworks/
+          # and Contents/PlugIns/ while the app binary itself was built
+          # arm64-only via -DCMAKE_OSX_ARCHITECTURES=arm64.
+          #
+          # The pre-flight architecture check below requires exactly one
+          # arm64 slice per Mach-O (we ship an arm64-only DMG), so we walk
+          # every Mach-O and strip x86_64 with `lipo -thin arm64`. Must run
+          # BEFORE codesign — any signature applied before thinning is
+          # invalidated the moment we rewrite the file.
+          echo "Thinning universal Mach-Os to arm64..."
+          THINNED_COUNT=0
+          while IFS= read -r f; do
+            file -h "$f" 2>/dev/null | grep -q "Mach-O" || continue
+            # Skip if already single-arch (saves a fork+exec per file).
+            ARCHS=$(file -h "$f" 2>/dev/null | grep -oE "(arm64|x86_64|i386|ppc)" | sort -u | tr '\n' ',' | sed 's/,$//')
+            [ "${ARCHS}" = "arm64" ] && continue
+            # Skip files with no arm64 slice at all (shouldn't happen for
+            # Qt's universal build, but guard against surprises in third-
+            # party dylibs that bundle_external_deps may have pulled in).
+            if ! echo "${ARCHS}" | grep -q "arm64"; then
+              echo "::warning::no arm64 slice in $f (archs: ${ARCHS}) — leaving as-is"
+              continue
+            fi
+            chmod u+w "$f" 2>/dev/null || true
+            if lipo -thin arm64 "$f" -output "$f" 2>/dev/null; then
+              THINNED_COUNT=$((THINNED_COUNT + 1))
+            else
+              echo "::warning::lipo -thin arm64 failed for $f"
+            fi
+          done < <(find "${APP_BUNDLE}" -type f 2>/dev/null)
+          echo "  thinned ${THINNED_COUNT} Mach-O(s) to arm64"
+
+      # ── Import Developer ID certificate into a temp keychain ──────────────
+      # The cert + private key live in repo secrets (base64-encoded .p12).
+      # We provision a throwaway keychain for this job so the runner's
+      # default login keychain stays untouched and the cert is gone the
+      # moment the job ends.
+      - name: Import Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          P12_PATH="$RUNNER_TEMP/cert.p12"
+          echo "$P12_BASE64" | base64 -d > "$P12_PATH"
+          security create-keychain -p "$P12_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$P12_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$P12_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$P12_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          rm -f "$P12_PATH"
+
+      # ── Deep re-sign the entire bundle with Developer ID ─────────────────
+      # macdeployqt's nested-framework signing is unreliable, so we strip
+      # every existing signature and re-sign the bundle leaves-to-root with
+      # the Developer ID Application cert. Hardened runtime is required by
+      # notarization; the entitlements below permit Python's JIT / dynamic
+      # library loading. (Originally fixed in issue #139.)
+      - name: Codesign bundle (Developer ID + hardened runtime)
+        working-directory: fiorch-qt
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euxo pipefail
+          APP_BUNDLE="build/${{ env.APP_NAME }}.app"
+
+          ENT="$RUNNER_TEMP/entitlements.plist"
+          cat > "$ENT" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.cs.allow-jit</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+            <key>com.apple.security.network.client</key><true/>
+            <key>com.apple.security.network.server</key><true/>
+          </dict></plist>
+          EOF
+
+          # Strip extended attributes (quarantine / provenance / Finder info)
+          # from the whole bundle. macdeployqt copies Qt frameworks out of the
+          # aqtinstall kit, which may carry com.apple.quarantine from the
+          # install-qt-action download. Leftover xattrs invalidate the
+          # signature the moment the DMG is copied to /Applications on
+          # macOS 14+ Apple Silicon (root cause of SIGKILL reports in #139,
+          # #173, #191).
+          # ── Fix bundled yt-dlp shebang ───────────────────────────────────
+          # CMake bundles yt-dlp via `find_program(... NAMES yt-dlp)`, which
+          # on macOS picks up Homebrew's wrapper at
+          # /opt/homebrew/Cellar/yt-dlp/<ver>/libexec/bin/yt-dlp. That
+          # wrapper's first line is a builder-local shebang:
+          #   #!/opt/homebrew/Cellar/yt-dlp/<ver>/libexec/bin/python
+          # That path doesn't exist on a user's Mac so dashboard YouTube
+          # playback fails at runtime. Rewrite to `/usr/bin/env python3`
+          # which resolves via the user's PATH (macOS 12.3+ ships
+          # /usr/bin/python3 by default; we also embed python3 ourselves
+          # at Contents/MacOS/python3 for callers that prepend the bundle
+          # dir to PATH). Note: yt-dlp is not a Mach-O, so this rewrite is
+          # invisible to the notary service — but the modified content
+          # must be sealed by codesign, so do it BEFORE the xattr strip
+          # and signing.
+          YTDLP="${APP_BUNDLE}/Contents/MacOS/yt-dlp"
+          if [ -f "${YTDLP}" ]; then
+              FIRST_LINE=$(head -1 "${YTDLP}" 2>/dev/null || true)
+              if [ "${FIRST_LINE#'#!'}" != "${FIRST_LINE}" ] && \
+                 [ "${FIRST_LINE}" != "#!/usr/bin/env python3" ]; then
+                  echo "Rewriting yt-dlp shebang (was: ${FIRST_LINE})"
+                  TMP_YT="${YTDLP}.fix"
+                  { echo "#!/usr/bin/env python3"; tail -n +2 "${YTDLP}"; } > "${TMP_YT}"
+                  chmod +x "${TMP_YT}"
+                  mv "${TMP_YT}" "${YTDLP}"
+              fi
+          fi
+
+          echo "Stripping extended attributes from bundle..."
+          xattr -cr "${APP_BUNDLE}" 2>/dev/null || true
+
+          # ── Sign every nested Mach-O explicitly, leaves-first ────────────
+          # `codesign --deep` is deprecated and does NOT propagate the
+          # `--options runtime` or `--timestamp` flags to nested binaries,
+          # so a bundled Python.framework comes out with ~80 unsigned .so
+          # files and no secure timestamp anywhere. The notary service then
+          # rejects every one of them ("The binary is not signed.",
+          # "The signature does not include a secure timestamp.", "The
+          # executable does not have the hardened runtime enabled.").
+          #
+          # Fix: walk each Mach-O / framework / nested .app and sign it
+          # individually with the same identity + runtime + timestamp.
+          # Then sign the top-level bundle (with entitlements) last.
+          # Reference:
+          #   https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution/resolving_common_notarization_issues#3087721
+
+          SIGN_FLAGS=(--force --options runtime --timestamp --sign "$SIGNING_IDENTITY")
+
+          # ── Enumerate every Mach-O via `file -h`, not by filename ────────
+          # Previously we filtered on `*.dylib | *.so | -perm +111`. That
+          # misses three real-world cases:
+          #   1. Mach-O files with no extension shipped as 0644 (some Python
+          #      C extensions, some plugin systems)
+          #   2. Linker stubs / utility binaries inside frameworks
+          #   3. Anything macdeployqt or bundle_external_deps drops in with
+          #      a non-standard name
+          # `file -h` (no follow-symlinks) inspects bytes, not the path —
+          # bulletproof. Cost: a few seconds extra to stat every file.
+          #
+          # CRITICAL: we exclude the bundle's main executable
+          # (Contents/MacOS/${APP_NAME}, the file named in CFBundleExecutable)
+          # from this list. When you hand codesign a path that IS a bundle's
+          # main executable, codesign treats it as signing the .app bundle
+          # itself and walks every nested PlugIns / Frameworks / Resources
+          # entry to validate they are already signed. Signing it here —
+          # before the leaf loop has signed the plugins — produces:
+          #   "<MainBin>: code object is not signed at all
+          #    In subcomponent: ...PlugIns/tls/libqsecuretransportbackend.dylib"
+          # The main executable gets sealed by the final
+          # `codesign ... "${APP_BUNDLE}"` step below, which is the
+          # canonical way per Apple's "Creating Distribution-Signed Code
+          # for the Mac" (sign inside-out, pass the bundle path not the
+          # binary path).
+          echo "Enumerating Mach-O files in bundle..."
+          MACHO_LIST="$RUNNER_TEMP/macho-files.txt"
+          MAIN_EXE="${APP_BUNDLE}/Contents/MacOS/${{ env.APP_NAME }}"
+          : > "${MACHO_LIST}"
+          while IFS= read -r f; do
+            [ "$f" = "${MAIN_EXE}" ] && continue
+            if file -h "$f" 2>/dev/null | grep -q "Mach-O"; then
+              printf '%s\n' "$f" >> "${MACHO_LIST}"
+            fi
+          done < <(find "${APP_BUNDLE}" -type f 2>/dev/null)
+          MACHO_COUNT=$(wc -l < "${MACHO_LIST}" | tr -d ' ')
+          echo "  found ${MACHO_COUNT} Mach-O file(s) (main executable signed separately at bundle root)"
+
+          echo "Stripping existing signatures from every Mach-O..."
+          while IFS= read -r f; do
+            codesign --remove-signature "$f" 2>/dev/null || true
+          done < "${MACHO_LIST}"
+          codesign --remove-signature "${MAIN_EXE}" 2>/dev/null || true
+          codesign --remove-signature "${APP_BUNDLE}" 2>/dev/null || true
+
+          echo "Signing every Mach-O with hardened runtime + timestamp..."
+          while IFS= read -r f; do
+            codesign "${SIGN_FLAGS[@]}" "$f" >/dev/null
+          done < "${MACHO_LIST}"
+
+          echo "Signing nested frameworks and .app bundles (deepest-first)..."
+          # `-depth` makes find emit each directory AFTER its contents, so
+          # nested Tcl.framework / Tk.framework / Python.app are signed
+          # before the Python.framework that contains them, and every
+          # framework is signed before the top-level .app below.
+          BUNDLE_COUNT=0
+          while IFS= read -r d; do
+            codesign "${SIGN_FLAGS[@]}" "$d" >/dev/null
+            BUNDLE_COUNT=$((BUNDLE_COUNT + 1))
+          done < <(find "${APP_BUNDLE}/Contents" -mindepth 1 -depth -type d \
+                        \( -name "*.framework" -o -name "*.app" \) 2>/dev/null)
+          echo "  signed ${BUNDLE_COUNT} nested bundles"
+
+          echo "Signing top-level bundle with entitlements..."
+          codesign --force --options runtime --timestamp \
+                   --entitlements "$ENT" \
+                   --sign "$SIGNING_IDENTITY" \
+                   "${APP_BUNDLE}"
+
+          echo "Verifying signature..."
+          codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}" || {
+            echo "::error::Bundle verification failed"
+            codesign --display --deep --verbose=4 "${APP_BUNDLE}" || true
+            exit 1
+          }
+
+          echo "Signature OK:"
+          codesign --display --verbose=2 "${APP_BUNDLE}" 2>&1 | head -20
+
+          # ── Pre-flight: catch notary-fatal issues locally ────────────────
+          # `codesign --verify` above validates that signatures are *present
+          # and consistent*, but it does NOT enforce the three things Apple's
+          # notary actually rejects on:
+          #   • hardened-runtime flag set on every Mach-O
+          #   • secure timestamp on every Mach-O
+          #   • only the architectures we shipped (arm64)
+          # We walk every Mach-O and assert each one. If any fails, we abort
+          # here — that saves a 2-5 min notary round-trip for an issue we
+          # could've caught on the runner.
+          # Validate the main executable too — it was excluded from
+          # MACHO_LIST (signed only at the bundle root step above) but
+          # the notary still expects it to carry runtime+timestamp+arm64.
+          echo "Pre-flight: validating every Mach-O..."
+          printf '%s\n' "${MAIN_EXE}" >> "${MACHO_LIST}"
+          BAD_RUNTIME=()
+          BAD_TIMESTAMP=()
+          BAD_ARCH=()
+          while IFS= read -r f; do
+            DISPLAY=$(codesign --display --verbose=2 "$f" 2>&1 || true)
+            if ! echo "${DISPLAY}" | grep -q "flags=.*runtime"; then
+              BAD_RUNTIME+=("$f")
+            fi
+            if ! echo "${DISPLAY}" | grep -q "Timestamp="; then
+              BAD_TIMESTAMP+=("$f")
+            fi
+            # `file -h` returns one line per arch slice for a fat binary.
+            # We want exactly one arm64 slice and nothing else.
+            ARCHS=$(file -h "$f" 2>/dev/null | grep -oE "(arm64|x86_64|i386|ppc)" | sort -u | tr '\n' ',' | sed 's/,$//')
+            if [ "${ARCHS}" != "arm64" ]; then
+              BAD_ARCH+=("${f} [${ARCHS}]")
+            fi
+          done < "${MACHO_LIST}"
+
+          PREFLIGHT_OK=1
+          if [ "${#BAD_RUNTIME[@]}" -gt 0 ]; then
+            PREFLIGHT_OK=0
+            echo "::error::${#BAD_RUNTIME[@]} Mach-O(s) missing hardened runtime (notary will reject):"
+            printf '    %s\n' "${BAD_RUNTIME[@]}" | head -20
+          fi
+          if [ "${#BAD_TIMESTAMP[@]}" -gt 0 ]; then
+            PREFLIGHT_OK=0
+            echo "::error::${#BAD_TIMESTAMP[@]} Mach-O(s) missing secure timestamp (notary will reject):"
+            printf '    %s\n' "${BAD_TIMESTAMP[@]}" | head -20
+          fi
+          if [ "${#BAD_ARCH[@]}" -gt 0 ]; then
+            PREFLIGHT_OK=0
+            echo "::error::${#BAD_ARCH[@]} Mach-O(s) with unexpected architecture (this build is arm64-only):"
+            printf '    %s\n' "${BAD_ARCH[@]}" | head -20
+          fi
+
+          # Sanity: `get-task-allow` must not appear in any signed entitlement
+          # — it's a development debugging flag and Apple's notary rejects it.
+          if codesign --display --entitlements - "${APP_BUNDLE}" 2>/dev/null | grep -q "get-task-allow"; then
+            PREFLIGHT_OK=0
+            echo "::error::get-task-allow entitlement is present — must be removed for distribution"
+          fi
+
+          if [ "${PREFLIGHT_OK}" -ne 1 ]; then
+            echo "::error::Pre-flight checks failed — fix above issues before notary submission"
+            exit 1
+          fi
+          echo "  pre-flight passed: all $((MACHO_COUNT + 1)) Mach-Os (incl. main exe) are arm64, hardened-runtime, timestamped"
+
+          rm -f "${MACHO_LIST}"
+
+          # Do NOT add `spctl --assess` here. spctl is a Gatekeeper
+          # *post*-flight (needs a notarization ticket stapled), so on a
+          # freshly-signed bundle it always fails with
+          # `source=Unnotarized Developer ID`. Notarization below is the
+          # authoritative check.
+
+      # ── Notarize + staple the .app BEFORE building the DMG ───────────────
+      # Stapling the .app means Gatekeeper validates offline on first launch
+      # after the user drags it to /Applications. Without this, the .app
+      # carries no ticket — Gatekeeper would have to phone home, and offline
+      # users would see "Apple could not verify ... is free of malware".
+      # The DMG gets its own notarization + staple in a later step.
+      - name: Notarize and staple .app
+        working-directory: fiorch-qt
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP_BUNDLE="build/${{ env.APP_NAME }}.app"
+          ZIP_PATH="$RUNNER_TEMP/app-for-notary.zip"
+          SUBMIT_JSON="$RUNNER_TEMP/notary-app-submit.json"
+
+          # ditto preserves symlinks + xattrs correctly; `zip` doesn't.
+          /usr/bin/ditto -c -k --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
+
+          # Submit WITHOUT --wait so we get the submission UUID immediately,
+          # then poll status ourselves with retries. `notarytool submit --wait`
+          # has no retry on transient network errors: a single dropped
+          # connection during the multi-minute poll loop kills the step
+          # (NSURLErrorDomain -1009 from the runner's network stack), even
+          # though Apple's side accepted and is processing the submission
+          # just fine. By owning the poll loop we can retry on TCP/DNS
+          # blips without losing the in-flight submission.
+          echo "Submitting .app to Apple notary..."
+          SUBMIT_ATTEMPTS=0
+          SUB_ID=""
+          while [ "${SUBMIT_ATTEMPTS}" -lt 3 ]; do
+            SUBMIT_ATTEMPTS=$((SUBMIT_ATTEMPTS + 1))
+            if xcrun notarytool submit "${ZIP_PATH}" \
+                 --apple-id "$APPLE_ID" \
+                 --team-id "$TEAM_ID" \
+                 --password "$NOTARY_PASSWORD" \
+                 --output-format json > "${SUBMIT_JSON}" 2>&1; then
+              SUB_ID=$(jq -r '.id // empty' < "${SUBMIT_JSON}")
+              [ -n "${SUB_ID}" ] && break
+            fi
+            echo "::warning::submit attempt ${SUBMIT_ATTEMPTS} failed:"
+            cat "${SUBMIT_JSON}" || true
+            sleep $((SUBMIT_ATTEMPTS * 30))
+          done
+          if [ -z "${SUB_ID}" ]; then
+            echo "::error::Could not submit to notary after ${SUBMIT_ATTEMPTS} attempts"
+            exit 1
+          fi
+          echo "Submitted: ${SUB_ID}"
+
+          # Poll for completion. notarytool info returns one of: In Progress,
+          # Accepted, Invalid, Rejected. We retry network failures (curl/
+          # NSURLError) without resubmitting — the submission already exists
+          # on Apple's side, we just need to read its current state.
+          echo "Polling notarization status (this can take a few minutes)..."
+          STATUS="In Progress"
+          POLL_START=$(date +%s)
+          POLL_TIMEOUT_SEC=1800   # 30 min hard cap; Apple usually answers in 2-5 min
+          NETWORK_FAILS=0
+          INFO_JSON="$RUNNER_TEMP/notary-app-info.json"
+          while true; do
+            ELAPSED=$(( $(date +%s) - POLL_START ))
+            if [ "${ELAPSED}" -gt "${POLL_TIMEOUT_SEC}" ]; then
+              echo "::error::Notarization poll timed out after ${POLL_TIMEOUT_SEC}s (last status: ${STATUS})"
+              exit 1
+            fi
+
+            if xcrun notarytool info "${SUB_ID}" \
+                 --apple-id "$APPLE_ID" \
+                 --team-id "$TEAM_ID" \
+                 --password "$NOTARY_PASSWORD" \
+                 --output-format json > "${INFO_JSON}" 2>&1; then
+              NETWORK_FAILS=0
+              STATUS=$(jq -r '.status // "Unknown"' < "${INFO_JSON}")
+              echo "  [${ELAPSED}s] status=${STATUS}"
+              case "${STATUS}" in
+                Accepted)        break ;;
+                Invalid|Rejected) break ;;
+                "In Progress")   sleep 20 ;;
+                *)               sleep 20 ;;
+              esac
+            else
+              NETWORK_FAILS=$((NETWORK_FAILS + 1))
+              echo "::warning::notarytool info network failure #${NETWORK_FAILS}:"
+              cat "${INFO_JSON}" || true
+              if [ "${NETWORK_FAILS}" -ge 10 ]; then
+                echo "::error::10 consecutive network failures polling notarization — runner connectivity is broken"
+                exit 1
+              fi
+              # Exponential backoff capped at 60s — gives DNS/TCP time to recover.
+              sleep $(( NETWORK_FAILS * 5 < 60 ? NETWORK_FAILS * 5 : 60 ))
+            fi
+          done
+
+          echo "Notarization submission ${SUB_ID} → ${STATUS}"
+          if [ "${STATUS}" != "Accepted" ]; then
+            echo "::error::Notarization failed for .app (status: ${STATUS}). Fetching Apple's log..."
+            # `notarytool log <id>` returns the pretty-printed JSON log
+            # whose .issues[] array names the exact files Apple rejected
+            # and why (missing hardened runtime, unsigned Mach-O, etc.).
+            xcrun notarytool log "${SUB_ID}" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$TEAM_ID" \
+              --password "$NOTARY_PASSWORD" \
+              || echo "::warning::Could not fetch notarization log for ${SUB_ID}"
+            exit 1
+          fi
+
+          echo "Stapling ticket to .app..."
+          xcrun stapler staple "${APP_BUNDLE}"
+          xcrun stapler validate "${APP_BUNDLE}"
+          rm -f "${ZIP_PATH}" "${SUBMIT_JSON}" "${INFO_JSON}"
+
+      # ── Copy signed bundle to dist/ ───────────────────────────────────────
+      - name: Finalize dist
+        working-directory: fiorch-qt
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp -R "build/${{ env.APP_NAME }}.app" "dist/"
+          echo "Final bundle size: $(du -sh "dist/${{ env.APP_NAME }}.app" | cut -f1)"
+
+      # ── Generate Installer (DMG via hdiutil) ──────────────────────────────
+      # We intentionally skip CPack IFW on macOS: CPack's install(TARGETS ...
+      # BUNDLE) rule packages the raw build-tree .app, NOT the post-processed
+      # one we just ran macdeployqt + deep codesign over. Shipping the raw
+      # bundle produces the dyld SIGKILL "Code Signature Invalid" crash
+      # tracked in issue #139. A plain hdiutil DMG over `dist/` (which
+      # contains the signed bundle) gives users a working drag-to-Apps DMG.
+      - name: Generate Installer (DMG)
+        working-directory: fiorch-qt
+        run: |
+          set -euo pipefail
+          # Parse project() VERSION so the DMG filename matches the regex in
+          # update-manifest: FinancialOrchestrator-<version>-macos-arm64-setup.dmg
+          VERSION=$(grep -Eo 'project\(FinancialOrchestrator VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $3}')
+          [ -n "${VERSION}" ] || { echo "::error::Could not parse VERSION from CMakeLists.txt"; exit 1; }
+          DMG_NAME="FinancialOrchestrator-${VERSION}-macos-arm64-setup.dmg"
+          echo "DMG target: ${DMG_NAME}"
+
+          STAGING="$(mktemp -d)/dmg_staging"
+          mkdir -p "${STAGING}"
+          cp -R "dist/${{ env.APP_NAME }}.app" "${STAGING}/"
+          # Symlink /Applications so users can drag the app across in the DMG.
+          ln -s /Applications "${STAGING}/Applications"
+
+          hdiutil create \
+            -volname "${{ env.APP_NAME }}" \
+            -srcfolder "${STAGING}" \
+            -ov -format UDZO \
+            "build/${DMG_NAME}"
+
+          ls -lh "build/${DMG_NAME}"
+
+      # ── Sign + Notarize + Staple DMG ──────────────────────────────────────
+      # Sign the DMG itself, submit to Apple's notary service, and staple
+      # the resulting ticket so Gatekeeper can verify offline. After this
+      # step the DMG opens on any Mac without "unidentified developer"
+      # warnings.
+      - name: Sign and notarize DMG
+        working-directory: fiorch-qt
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          DMG=$(ls build/FinancialOrchestrator-*-macos-arm64-setup.dmg | head -1)
+          echo "Signing DMG: ${DMG}"
+          codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG"
+
+          # Same submit-then-poll pattern as the .app step: --wait has no
+          # retry on transient network errors (NSURLErrorDomain -1009 from
+          # the runner), so we own the poll loop.
+          SUBMIT_JSON="$RUNNER_TEMP/notary-dmg-submit.json"
+          INFO_JSON="$RUNNER_TEMP/notary-dmg-info.json"
+
+          echo "Submitting DMG to Apple notary..."
+          SUBMIT_ATTEMPTS=0
+          SUB_ID=""
+          while [ "${SUBMIT_ATTEMPTS}" -lt 3 ]; do
+            SUBMIT_ATTEMPTS=$((SUBMIT_ATTEMPTS + 1))
+            if xcrun notarytool submit "$DMG" \
+                 --apple-id "$APPLE_ID" \
+                 --team-id "$TEAM_ID" \
+                 --password "$NOTARY_PASSWORD" \
+                 --output-format json > "${SUBMIT_JSON}" 2>&1; then
+              SUB_ID=$(jq -r '.id // empty' < "${SUBMIT_JSON}")
+              [ -n "${SUB_ID}" ] && break
+            fi
+            echo "::warning::DMG submit attempt ${SUBMIT_ATTEMPTS} failed:"
+            cat "${SUBMIT_JSON}" || true
+            sleep $((SUBMIT_ATTEMPTS * 30))
+          done
+          if [ -z "${SUB_ID}" ]; then
+            echo "::error::Could not submit DMG to notary after ${SUBMIT_ATTEMPTS} attempts"
+            exit 1
+          fi
+          echo "Submitted: ${SUB_ID}"
+
+          echo "Polling DMG notarization status..."
+          STATUS="In Progress"
+          POLL_START=$(date +%s)
+          POLL_TIMEOUT_SEC=1800
+          NETWORK_FAILS=0
+          while true; do
+            ELAPSED=$(( $(date +%s) - POLL_START ))
+            if [ "${ELAPSED}" -gt "${POLL_TIMEOUT_SEC}" ]; then
+              echo "::error::DMG notarization poll timed out after ${POLL_TIMEOUT_SEC}s (last: ${STATUS})"
+              exit 1
+            fi
+            if xcrun notarytool info "${SUB_ID}" \
+                 --apple-id "$APPLE_ID" \
+                 --team-id "$TEAM_ID" \
+                 --password "$NOTARY_PASSWORD" \
+                 --output-format json > "${INFO_JSON}" 2>&1; then
+              NETWORK_FAILS=0
+              STATUS=$(jq -r '.status // "Unknown"' < "${INFO_JSON}")
+              echo "  [${ELAPSED}s] status=${STATUS}"
+              case "${STATUS}" in
+                Accepted)        break ;;
+                Invalid|Rejected) break ;;
+                *)               sleep 20 ;;
+              esac
+            else
+              NETWORK_FAILS=$((NETWORK_FAILS + 1))
+              echo "::warning::notarytool info network failure #${NETWORK_FAILS}:"
+              cat "${INFO_JSON}" || true
+              if [ "${NETWORK_FAILS}" -ge 10 ]; then
+                echo "::error::10 consecutive network failures — runner connectivity is broken"
+                exit 1
+              fi
+              sleep $(( NETWORK_FAILS * 5 < 60 ? NETWORK_FAILS * 5 : 60 ))
+            fi
+          done
+
+          echo "DMG notarization submission ${SUB_ID} → ${STATUS}"
+          if [ "${STATUS}" != "Accepted" ]; then
+            echo "::error::Notarization failed for DMG (status: ${STATUS}). Fetching Apple's log..."
+            xcrun notarytool log "${SUB_ID}" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$TEAM_ID" \
+              --password "$NOTARY_PASSWORD" \
+              || echo "::warning::Could not fetch notarization log for ${SUB_ID}"
+            exit 1
+          fi
+
+          echo "Stapling ticket..."
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature -vv "$DMG" || true
+          rm -f "${SUBMIT_JSON}" "${INFO_JSON}"
+
+      # ── Clean up the temp keychain ────────────────────────────────────────
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+
+      # ── Upload ────────────────────────────────────────────────────────────
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinancialOrchestrator-macOS-arm64-installer
+          path: fiorch-qt/build/FinancialOrchestrator-*-macos-arm64-setup.dmg
+          retention-days: 30
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JOB 4 — Create GitHub Release and attach all installers
+#          Only runs on tag push after all builds succeed
+# ═════════════════════════════════════════════════════════════════════════════
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: >-
+      !cancelled() &&
+      needs.build-windows.result == 'success' &&
+      needs.build-linux.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    outputs:
+      # Pass the tag so update-readme can use it
+      tag: ${{ github.ref_name }}
+
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: FinancialOrchestrator-Windows-x64-installer
+          path: dist/windows
+
+      - name: Download Linux installer
+        uses: actions/download-artifact@v4
+        with:
+          name: FinancialOrchestrator-Linux-x64-installer
+          path: dist/linux
+
+      - name: Download macOS installer
+        uses: actions/download-artifact@v4
+        with:
+          name: FinancialOrchestrator-macOS-arm64-installer
+          path: dist/macos
+
+      - name: List release assets
+        run: find dist -type f | sort
+
+      - name: Create GitHub Release and attach installers
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Financial Orchestrator ${{ github.ref_name }}"
+          body: |
+            ## Financial Orchestrator ${{ github.ref_name }}
+
+            Native C++20 financial intelligence terminal — Qt6, embedded Python analytics, 50+ screens.
+
+            ### Downloads
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | **Windows x64** | `FinancialOrchestrator-*-setup*.exe` | Run installer → `FinancialOrchestrator.exe` |
+            | **Linux x64** | `FinancialOrchestrator-*.run` | `chmod +x` → run installer |
+            | **macOS Apple Silicon** | `FinancialOrchestrator-*.dmg` or setup | Open DMG → drag to Applications |
+
+            ### Requirements
+            - Windows 10/11 x64
+            - Ubuntu 20.04+ / Debian 11+
+            - macOS 13+ (Apple Silicon)
+
+            See the [README](https://github.com/Archsec-Emman/FinancialOrchestrator#readme) for full installation instructions.
+          files: |
+            dist/windows/**
+            dist/linux/**
+            dist/macos/**
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JOB 5 — Update repo metadata on main (README download links + updates.json)
+#
+# Previously split into two jobs that both ran `needs: release` and both
+# pushed to main — they raced and the loser died with
+# `! [rejected] main -> main (fetch first)`. Worse, when the loser was the
+# updates.json push, the in-app auto-updater (UpdateService.cpp fetches
+# raw.githubusercontent.com/.../main/updates.json) would never see the new
+# version, silently breaking updates for every existing install.
+#
+# Merged into ONE job with ONE checkout, ONE commit (containing both file
+# changes), and ONE push. No race possible. No retries needed.
+#
+# Outputs:
+#  - README.md: download table rewritten with current release asset URLs
+#  - updates.json: manifest consumed by UpdateService.cpp; platform keys must
+#    match UpdateService::current_platform_key()
+#    (windows-x64 / windows-arm64 / linux-x64 / macos-arm64 / macos-x64).
+#    Asset filenames must match CPACK_PACKAGE_FILE_NAME in CMakeLists.txt:
+#    FinancialOrchestrator-<version>-<platform>-<arch>-setup.<ext>
+# ═════════════════════════════════════════════════════════════════════════════
+  update-repo-metadata:
+    name: Update README + updates.json on main
+    needs: release
+    runs-on: ubuntu-latest
+    if: >-
+      !cancelled() &&
+      needs.release.result == 'success' &&
+      startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository (main branch, full history)
+        uses: actions/checkout@v4
+        with:
+          # Write-scoped token so we can push the merged commit back.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Checkout main (not the tag) because we commit on top of main.
+          ref: main
+          # fetch-depth: 0 gives us full history. Needed so a future
+          # `git pull --rebase` (only used if a human race-pushes to main
+          # during the workflow — vanishingly rare but cheap insurance)
+          # has the base commits available.
+          fetch-depth: 0
+
+      # ── Wait for the release to be fully published ────────────────────────
+      # GitHub's release-creation step in the previous job returns as soon as
+      # the release row exists, but the asset rows can take a few seconds to
+      # propagate to the API. Poll for visibility once here; both downstream
+      # steps (URL fetch + asset download) share this readiness gate instead
+      # of each polling separately.
+      - name: Wait for release to be visible
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            ASSET_COUNT=$(gh release view "${TAG}" --json assets --jq '.assets | length' 2>/dev/null || echo "0")
+            echo "  attempt ${i}: ${ASSET_COUNT} asset(s) visible"
+            [ "${ASSET_COUNT}" -ge 1 ] && exit 0
+            sleep 5
+          done
+          echo "::error::Release ${TAG} still has no visible assets after 60s"
+          exit 1
+
+      # ── Fetch release asset URLs via gh CLI ───────────────────────────────
+      # gh is pre-installed on all GitHub-hosted runners.
+      - name: Fetch release asset URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "Fetching asset URLs for release ${TAG}..."
+
+          # Extract URLs for each platform (first match per pattern)
+          WIN_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("(?i)windows.*\\.exe$|setup.*\\.exe$")) | .url' \
+            | head -1)
+          LIN_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("\\.run$|linux.*setup")) | .url' \
+            | head -1)
+          MAC_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("\\.dmg$|macos.*setup")) | .url' \
+            | head -1)
+
+          # Fallback: if browser_download_url not available via .url, try .browserDownloadUrl
+          [ -z "$WIN_URL" ] && WIN_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("(?i)windows.*\\.exe$|setup.*\\.exe$")) | .browserDownloadUrl' \
+            | head -1) || true
+          [ -z "$LIN_URL" ] && LIN_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("\\.run$|linux.*setup")) | .browserDownloadUrl' \
+            | head -1) || true
+          [ -z "$MAC_URL" ] && MAC_URL=$(gh release view "${TAG}" --json assets \
+            --jq '.assets[] | select(.name | test("\\.dmg$|macos.*setup")) | .browserDownloadUrl' \
+            | head -1) || true
+
+          # Release page URL as final fallback
+          RELEASE_URL="https://github.com/Archsec-Emman/FinancialOrchestrator/releases/tag/${TAG}"
+          WIN_URL="${WIN_URL:-${RELEASE_URL}}"
+          LIN_URL="${LIN_URL:-${RELEASE_URL}}"
+          MAC_URL="${MAC_URL:-${RELEASE_URL}}"
+
+          echo "WIN_URL=${WIN_URL}" >> "$GITHUB_ENV"
+          echo "LIN_URL=${LIN_URL}" >> "$GITHUB_ENV"
+          echo "MAC_URL=${MAC_URL}" >> "$GITHUB_ENV"
+          echo "RELEASE_URL=${RELEASE_URL}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+          echo "Windows  : ${WIN_URL}"
+          echo "Linux    : ${LIN_URL}"
+          echo "macOS    : ${MAC_URL}"
+
+      # ── Rewrite README download table ─────────────────────────────────────
+      # Strategy: replace a clearly-delimited block between two sentinel
+      # comments. Robust — no regex on links needed.
+      - name: Update README download table
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          START_MARKER="<!-- DOWNLOAD-TABLE-START -->"
+          END_MARKER="<!-- DOWNLOAD-TABLE-END -->"
+
+          NEW_BLOCK="${START_MARKER}
+          ### Option 1 — Download Installer (Recommended)
+
+          Latest release: **${TAG}** — [View all releases](${RELEASE_URL})
+
+          | Platform | Download | Run |
+          |----------|----------|-----|
+          | **Windows x64** | [FinancialOrchestrator-Windows-x64-setup.exe](${WIN_URL}) | Run installer → launch \`FinancialOrchestrator.exe\` |
+          | **Linux x64** | [FinancialOrchestrator-Linux-x64.run](${LIN_URL}) | \`chmod +x\` → run installer |
+          | **macOS Apple Silicon** | [FinancialOrchestrator-macOS-arm64.dmg](${MAC_URL}) | Open DMG → drag to Applications |
+          ${END_MARKER}"
+
+          README="README.md"
+
+          # Delegate regex replacement to a standalone Python script so
+          # YAML indentation can't poison the Python source.
+          export README NEW_BLOCK
+          python3 .github/scripts/update_readme_table.py
+
+          echo "=== README diff preview (first 60 lines) ==="
+          git diff README.md | head -60 || true
+
+      # ── Regenerate updates.json (auto-updater manifest) ───────────────────
+      - name: Regenerate updates.json from release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Strip leading 'v' so "v4.0.3" → "4.0.3" for latest-version
+          VERSION="${TAG#v}"
+
+          WORK="$(mktemp -d)"
+          echo "Downloading release assets to ${WORK}..."
+          gh release download "${TAG}" --dir "${WORK}" --pattern "FinancialOrchestrator-*setup*" || true
+
+          # Export shell-side vars so the embedded python can read them via os.environ
+          export WORK VERSION TAG REPO
+
+          # Delegate manifest generation to a standalone Python script to
+          # keep this step free of YAML/Python indentation conflicts.
+          python3 .github/scripts/generate_updates_manifest.py > updates.json
+
+          echo "=== updates.json diff ==="
+          git diff updates.json | head -80 || true
+
+      # ── Single atomic commit + push ───────────────────────────────────────
+      # Both files in one commit → one push → no race with anything. If
+      # neither file changed (rare but possible, e.g. re-running the same
+      # tag), exit cleanly without an empty commit.
+      - name: Commit and push repo metadata
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          README_CHANGED=0
+          MANIFEST_CHANGED=0
+          git diff --quiet README.md    || README_CHANGED=1
+          git diff --quiet updates.json || MANIFEST_CHANGED=1
+
+          if [ "${README_CHANGED}" -eq 0 ] && [ "${MANIFEST_CHANGED}" -eq 0 ]; then
+            echo "Neither README.md nor updates.json changed — nothing to commit"
+            exit 0
+          fi
+
+          # Stage only what we own. Never `git add -A` in automation: a
+          # stray artefact from an earlier step would sneak into main.
+          [ "${README_CHANGED}"   -eq 1 ] && git add README.md
+          [ "${MANIFEST_CHANGED}" -eq 1 ] && git add updates.json
+
+          git commit -m "chore(release): update README download links and updates.json for ${TAG}
+
+          Auto-generated by release workflow after successful build:
+            * README.md: download table rewritten with ${TAG} asset URLs
+            * updates.json: manifest consumed by the in-app auto-updater
+              (UpdateService.cpp) — sha256 computed from release assets.
+
+          Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+
+          # Defensive: if a human raced us and pushed to main during this
+          # workflow, rebase once and retry. We do NOT race any sibling job
+          # here (there are none), so this should almost never fire.
+          if ! git push origin main; then
+            echo "::warning::push rejected (likely external push to main); rebasing once..."
+            git pull --rebase origin main
+            git push origin main
+          fi
+          echo "Repo metadata pushed to main"

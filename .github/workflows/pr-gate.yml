@@ -1,0 +1,148 @@
+name: PR Scope Gate
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled, ready_for_review]
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  scope-check:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate PR scope
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const number = pr.number;
+
+            // ── Config ────────────────────────────────────────────────
+            const APPROVED_LABELS = ['good-first-issue', 'help-wanted', 'scope:approved'];
+            const BYPASS_LABEL = 'scope:approved';
+            const FORK_DEFAULTS = new Set(['main', 'master']);
+            const headRepoName = pr.head && pr.head.repo ? pr.head.repo.full_name : null;
+            const isFork = headRepoName && headRepoName !== pr.base.repo.full_name;
+            const forkMainWarn = isFork && FORK_DEFAULTS.has(pr.head.ref);
+
+            // ── Bypass: maintainer labeled this PR scope:approved ─────
+            const prLabels = (pr.labels || []).map(l => l.name);
+            const prBypass = prLabels.includes(BYPASS_LABEL);
+
+            // ── Collect linked issues ─────────────────────────────────
+            // 1) Closing-keywords in the PR body (textual)
+            // 2) GitHub's "Linked issues" sidebar (GraphQL closingIssuesReferences)
+            const body = pr.body || '';
+            const closesRegex = /\b(?:clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\b[:\s]+(?:#|GH-)(\d+(?:\s*,\s*#?\d+)*)/gi;
+            const textualIssues = [];
+            for (const m of body.matchAll(closesRegex)) {
+              for (const piece of m[1].split(/\s*,\s*#?/)) {
+                const id = parseInt(piece, 10);
+                if (!Number.isNaN(id)) textualIssues.push(id);
+              }
+            }
+
+            let sidebarIssues = [];
+            try {
+              const q = `query($owner:String!,$repo:String!,$number:Int!){
+                repository(owner:$owner,name:$repo){
+                  pullRequest(number:$number){
+                    closingIssuesReferences(first:20){nodes{number}}
+                  }
+                }
+              }`;
+              const r = await github.graphql(q, { owner, repo, number });
+              sidebarIssues = (r.repository.pullRequest.closingIssuesReferences.nodes || []).map(n => n.number);
+            } catch (e) { /* fall back to text-only */ }
+
+            const linkedIssues = [...new Set([...textualIssues, ...sidebarIssues])];
+
+            // ── Check linked issues for approval labels ───────────────
+            let approvedIssue = null;
+            for (const n of linkedIssues) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: n });
+                const names = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+                if (names.some(x => APPROVED_LABELS.includes(x))) { approvedIssue = n; break; }
+              } catch (e) { /* issue may not exist — keep checking */ }
+            }
+
+            // ── Build problem buckets ─────────────────────────────────
+            // scopeProblems → trigger `needs-scope-approval` label (real policy violation)
+            // advisories    → friendly notes that should NOT trigger the scope label
+            const scopeProblems = [];
+            if (!prBypass && !approvedIssue) {
+              scopeProblems.push(
+                `❌ **No scope-approved linked issue.** This PR must close an issue that carries one of: ` +
+                APPROVED_LABELS.map(l => '`' + l + '`').join(', ') +
+                `. Link it in the PR body with \`Closes #NNN\` or via GitHub's "Linked issues" sidebar.`
+              );
+            }
+
+            const advisories = [];
+            if (forkMainWarn) {
+              advisories.push(
+                `⚠️ **PR opened from your fork's \`${pr.head.ref}\` branch.** Please use a topic branch (e.g. \`fix/short-slug\`) — see CONTRIBUTING.md.`
+              );
+            }
+
+            // ── Comment + label ───────────────────────────────────────
+            const marker = '<!-- pr-scope-gate -->';
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number: number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            const hasAnything = scopeProblems.length + advisories.length > 0;
+
+            if (!hasAnything) {
+              if (existing) {
+                await github.rest.issues.deleteComment({ owner, repo, comment_id: existing.id });
+              }
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: 'needs-scope-approval' });
+              } catch (e) {}
+              core.setOutput('blocked', 'false');
+              return;
+            }
+
+            const lines = [marker, `Hi @${pr.user.login} — thanks for the PR!`];
+            if (scopeProblems.length) {
+              lines.push('', 'Our automated scope gate flagged the following:', '', ...scopeProblems);
+              lines.push(
+                '',
+                `Please read [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/.github/CONTRIBUTING.md). ` +
+                `Once an issue with the appropriate label exists and is linked here, re-run this check by pushing an empty commit or editing the PR description. ` +
+                `A maintainer can also bypass this gate by adding the \`${BYPASS_LABEL}\` label to **this PR**.`,
+                '',
+                `PRs that remain unresolved for 7 days will be closed automatically.`
+              );
+            }
+            if (advisories.length) {
+              lines.push('', ...advisories);
+            }
+            const body_md = lines.join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: body_md });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body: body_md });
+            }
+
+            // Only label PRs that have an actual scope violation. Advisories alone
+            // (e.g. fork-main branch) don't warrant `needs-scope-approval`.
+            if (scopeProblems.length) {
+              try {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['needs-scope-approval'] });
+              } catch (e) {}
+              core.setOutput('blocked', 'true');
+            } else {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: 'needs-scope-approval' });
+              } catch (e) {}
+              core.setOutput('blocked', 'false');
+            }

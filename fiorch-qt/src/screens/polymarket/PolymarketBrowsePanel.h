@@ -1,0 +1,62 @@
+#pragma once
+
+#include "screens/polymarket/ExchangePresentation.h"
+#include "services/prediction/PredictionTypes.h"
+
+#include <QLabel>
+#include <QListView>
+#include <QPushButton>
+#include <QWidget>
+
+namespace fiorch::screens::polymarket {
+
+class PolymarketMarketCardModel;
+class PolymarketMarketCardDelegate;
+
+/// Left browse panel: market/event list with pagination.
+/// Consumes unified prediction::* types so both Polymarket and Kalshi render
+/// through the same delegate.
+class PolymarketBrowsePanel : public QWidget {
+    Q_OBJECT
+  public:
+    explicit PolymarketBrowsePanel(QWidget* parent = nullptr);
+
+    void set_markets(const QVector<fiorch::services::prediction::PredictionMarket>& markets);
+    void set_events(const QVector<fiorch::services::prediction::PredictionEvent>& events);
+    void set_loading(bool loading);
+    void clear();
+
+    /// Replace a single market row in place (e.g. after a Kalshi lifecycle
+    /// event refetched one market). No-op if the ticker isn't in the list.
+    void update_market_row(const fiorch::services::prediction::PredictionMarket& market);
+
+    /// Forwarded to the model so the delegate paints with the active
+    /// exchange's accent and price formatter.
+    void set_presentation(const ExchangePresentation& p);
+
+  signals:
+    void market_selected(const fiorch::services::prediction::PredictionMarket& market);
+    void event_selected(const fiorch::services::prediction::PredictionEvent& event);
+
+  private slots:
+    void on_item_clicked(const QModelIndex& index);
+    void on_prev();
+    void on_next();
+
+  private:
+    void update_page();
+
+    PolymarketMarketCardModel* model_ = nullptr;
+    PolymarketMarketCardDelegate* delegate_ = nullptr;
+    QListView* list_view_ = nullptr;
+    QLabel* header_ = nullptr;
+    QPushButton* prev_btn_ = nullptr;
+    QPushButton* next_btn_ = nullptr;
+    QLabel* page_label_ = nullptr;
+
+    int current_page_ = 0;
+    bool events_mode_ = false;
+    static constexpr int PAGE_SIZE = 20;
+};
+
+} // namespace fiorch::screens::polymarket

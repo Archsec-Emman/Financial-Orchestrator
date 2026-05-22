@@ -1,0 +1,62 @@
+// src/screens/portfolio/PortfolioSectorPanel.h
+#pragma once
+#include "screens/portfolio/PortfolioTypes.h"
+
+#include <QChartView>
+#include <QHash>
+#include <QLabel>
+#include <QWidget>
+
+namespace fiorch::screens {
+
+/// Sector allocation donut chart + NxN correlation matrix.
+class PortfolioSectorPanel : public QWidget {
+    Q_OBJECT
+  public:
+    explicit PortfolioSectorPanel(QWidget* parent = nullptr);
+
+    void set_holdings(const QVector<portfolio::HoldingWithQuote>& holdings);
+    void set_currency(const QString& currency);
+    /// Feed real pairwise Pearson correlation matrix (key = "SYM1|SYM2").
+    void set_correlation(const QHash<QString, double>& matrix);
+
+    // Sector utilities — public so callers can map indices to colors
+    static QColor sector_color(int index);
+
+  protected:
+    void changeEvent(QEvent* event) override;
+
+  signals:
+    /// Emitted when the user clicks a pie slice. Empty string = clear filter.
+    void sector_selected(QString sector);
+
+  protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
+  private:
+    void build_ui();
+    void update_donut();
+    void update_correlation();
+    void on_sector_legend_clicked(const QString& sector);
+    void retranslateUi();
+
+    // Header labels
+    QLabel* title_label_ = nullptr;
+    QLabel* corr_title_ = nullptr;
+    QLabel* corr_note_ = nullptr;
+
+    // Donut chart
+    QChartView* donut_view_ = nullptr;
+    QWidget* legend_widget_ = nullptr;
+
+    // Correlation matrix
+    QWidget* corr_widget_ = nullptr;
+
+    // Data
+    QVector<portfolio::HoldingWithQuote> holdings_;
+    QString currency_ = "USD";
+    QString selected_sector_;            // empty = no filter active
+    QHash<QString, double> corr_matrix_; // real Pearson matrix, key="SYM1|SYM2"
+};
+
+} // namespace fiorch::screens

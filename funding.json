@@ -1,0 +1,88 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "organisation",
+    "role": "owner",
+    "email": "support@fiorch.in",
+    "webpageUrl": {
+      "url": "https://github.com/Archsec-Emman/FinancialOrchestrator"
+    }
+  },
+  "projects": [
+    {
+      "guid": "fiorch-terminal",
+      "name": "Financial Orchestrator",
+      "description": "Native C++20 financial intelligence terminal built with Dear ImGui and embedded Python. Features full multi-asset analytics across equity, portfolio, derivatives, fixed income, and alternatives, 20+ AI investor personas, 100+ data connectors, visual workflow automation, maritime tracking, and geopolitical intelligence frameworks. A professional, open-source alternative to legacy financial terminals, built for analysts who refuse to be limited by traditional software.",
+      "webpageUrl": {
+        "url": "https://github.com/Archsec-Emman/FinancialOrchestrator"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/Archsec-Emman/FinancialOrchestrator"
+      },
+      "licenses": [
+        "spdx:AGPL-3.0"
+      ],
+      "tags": [
+        "finance",
+        "analytics",
+        "ai",
+        "trading",
+        "portfolio-management",
+        "data-visualization",
+        "workflow-automation",
+        "cpp",
+        "imgui",
+        "python"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "github-sponsors",
+        "type": "payment-provider",
+        "address": "https://github.com/sponsors/tilakpatel22",
+        "description": "GitHub Sponsors for one-time or recurring donations"
+      }
+    ],
+    "plans": [
+      {
+        "guid": "one-time-grant",
+        "status": "active",
+        "name": "One-time Grant/Donation",
+        "description": "Support the development of Financial Orchestrator with a one-time contribution to fund feature development, infrastructure, and maintenance.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "github-sponsors"
+        ]
+      },
+      {
+        "guid": "monthly-sponsorship",
+        "status": "active",
+        "name": "Monthly Sponsorship",
+        "description": "Recurring monthly support to sustain ongoing development, bug fixes, documentation, and community support.",
+        "amount": 0,
+        "currency": "USD",
+        "frequency": "monthly",
+        "channels": [
+          "github-sponsors"
+        ]
+      },
+      {
+        "guid": "development-grant",
+        "status": "active",
+        "name": "Development Grant",
+        "description": "Grants to fund specific development initiatives: advanced AI agents, additional data connectors, mobile applications, institutional features, and infrastructure scaling.",
+        "amount": 17000,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "github-sponsors"
+        ]
+      }
+    ]
+  }
+}

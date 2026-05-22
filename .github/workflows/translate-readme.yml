@@ -1,0 +1,86 @@
+name: Translate README
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Translate to Spanish
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: es
+          COMMIT: false
+
+      - name: Translate to Chinese
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: zh-CN
+          COMMIT: false
+
+      - name: Translate to Japanese
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: ja
+          COMMIT: false
+
+      - name: Translate to French
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: fr
+          COMMIT: false
+
+      - name: Translate to Korean
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: ko
+          COMMIT: false
+
+      - name: Translate to German
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: de
+          COMMIT: false
+
+      - name: Translate to Hindi
+        uses: dephraiim/translate-readme@main
+        with:
+          LANG: hi
+          COMMIT: false
+
+      - name: Move translations and clean up root
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Pull any commits the action made to root despite COMMIT: false
+          git pull --rebase origin main || true
+
+          # Move any translated files from root to docs/translations/
+          mkdir -p docs/translations
+          for lang in es zh-CN ja fr ko de hi; do
+            if [ -f "README.${lang}.md" ]; then
+              mv "README.${lang}.md" "docs/translations/README.${lang}.md"
+            fi
+          done
+
+          # Remove any root-level translated READMEs from git tracking
+          for lang in es zh-CN ja fr ko de hi; do
+            git rm --cached "README.${lang}.md" 2>/dev/null || true
+          done
+
+          # Stage the correct location
+          git add docs/translations/
+
+          # Commit only if there are changes
+          git diff --staged --quiet || git commit -m "chore: update translated READMEs in docs/translations/"
+          git push || echo "No changes to push"

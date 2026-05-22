@@ -1,0 +1,218 @@
+// src/services/gov_data/GovDataService.cpp
+#include "services/gov_data/GovDataService.h"
+
+#include "core/logging/Logger.h"
+#include "python/PythonRunner.h"
+#include "storage/cache/CacheManager.h"
+
+#    include "datahub/DataHub.h"
+#    include "datahub/DataHubMetaTypes.h"
+
+#include <QJsonDocument>
+#include <QJsonParseError>
+
+namespace fiorch::services {
+
+// ── Static provider list ─────────────────────────────────────────────────────
+
+static const QVector<GovProviderInfo> kProviders = {
+    {"us-treasury", "US Treasury", "U.S. Department of the Treasury",
+     "Treasury securities prices, auctions & market data", "#3B82F6", "United States", "US", "government_us_data.py"},
+
+    {"us-congress", "US Congress", "United States Congress", "Congressional bills, resolutions & legislative activity",
+     "#8B5CF6", "United States", "US", "congress_gov_data.py"},
+
+    {"canada-gov", "Canada Open Gov", "Government of Canada Open Data",
+     "Open data from Canadian federal departments & agencies", "#EF4444", "Canada", "CA", "canada_gov_api.py"},
+
+    {"swiss", "Swiss Open Data", "opendata.swiss", "Swiss federal open data portal (DE/FR/IT/EN)", "#E11D48",
+     "Switzerland", "CH", "swiss_gov_api.py"},
+
+    {"france", "France Open Data", "data.gouv.fr", "French government APIs: geographic, datasets, company registry",
+     "#2563EB", "France", "FR", "french_gov_api.py"},
+
+    {"hk", "Hong Kong Gov", "Data.gov.hk", "Hong Kong government open data portal", "#F43F5E", "Hong Kong", "HK",
+     "data_gov_hk_api.py"},
+
+    {"openafrica", "openAFRICA", "openAFRICA Open Data Portal",
+     "African open data from organizations across the continent", "#F59E0B", "Africa", "AF",
+     "canada_gov_api.py"}, // Uses CKAN pattern
+
+    {"spain", "Spain Open Data", "datos.gob.es", "Spanish government open data portal", "#DC2626", "Spain", "ES",
+     "canada_gov_api.py"}, // placeholder
+
+    {"universal-ckan", "CKAN Portals", "Universal CKAN Open Data Portals",
+     "8 CKAN portals: US, UK, Australia, Italy, Brazil & more", "#10B981", "Multi-Country", "CKAN", "datagovuk_api.py"},
+
+    {"australia", "Australia Gov", "data.gov.au", "Australian government open data portal", "#0EA5E9", "Australia",
+     "AU", "datagov_au_api.py"},
+};
+
+const QVector<GovProviderInfo>& GovDataService::providers() {
+    return kProviders;
+}
+
+const GovProviderInfo* GovDataService::provider_by_id(const QString& id) {
+    for (const auto& p : kProviders) {
+        if (p.id == id)
+            return &p;
+    }
+    return nullptr;
+}
+
+// ── Singleton ────────────────────────────────────────────────────────────────
+
+GovDataService& GovDataService::instance() {
+    static GovDataService inst;
+    return inst;
+}
+
+GovDataService::GovDataService(QObject* parent) : QObject(parent) {}
+
+// ── Cache ────────────────────────────────────────────────────────────────────
+
+QString GovDataService::cache_key(const QString& script, const QString& command, const QStringList& args) const {
+    return "govdata:" + script + ":" + command + ":" + args.join(",");
+}
+
+// ── Execute ──────────────────────────────────────────────────────────────────
+
+void GovDataService::execute(const QString& script, const QString& command, const QStringList& args,
+                             const QString& request_id) {
+    const QString key = cache_key(script, command, args);
+
+    const QString topic = hub_topic(script, request_id);
+    dispatch_records_.insert(topic, DispatchRecord{script, command, args, request_id});
+
+    // Serve from cache if fresh
+    const QVariant cached = fiorch::CacheManager::instance().get(key);
+    if (!cached.isNull()) {
+        LOG_DEBUG("GovDataService", QString("Cache hit: %1").arg(key));
+        GovDataResult result;
+        result.success = true;
+        result.data = QJsonDocument::fromJson(cached.toString().toUtf8()).object();
+        emit result_ready(request_id, result);
+        if (hub_registered_)
+            fiorch::datahub::DataHub::instance().publish(topic, QVariant::fromValue(result));
+        return;
+    }
+
+    // Build args: command first, then extra args
+    QStringList full_args;
+    full_args << command;
+    full_args << args;
+
+    LOG_INFO("GovDataService", QString("Executing %1 %2 [%3]").arg(script, command, args.join(", ")));
+
+    QPointer<GovDataService> self = this;
+    python::PythonRunner::instance().run(script, full_args, [self, script, request_id, key](python::PythonResult py_result) {
+        if (!self)
+            return;
+
+        GovDataResult result;
+
+        if (!py_result.success) {
+            result.success = false;
+            result.error = py_result.error.isEmpty() ? QString("Script exited with code %1").arg(py_result.exit_code)
+                                                     : py_result.error;
+            LOG_ERROR("GovDataService", QString("Script failed: %1").arg(result.error));
+            emit self->result_ready(request_id, result);
+            return;
+        }
+
+        // Extract JSON from output
+        QString json_str = python::extract_json(py_result.output);
+        if (json_str.isEmpty()) {
+            result.success = false;
+            result.error = "No JSON output from script";
+            LOG_ERROR("GovDataService", "No JSON in script output");
+            emit self->result_ready(request_id, result);
+            return;
+        }
+
+        QJsonParseError parse_err;
+        QJsonDocument doc = QJsonDocument::fromJson(json_str.toUtf8(), &parse_err);
+        if (doc.isNull()) {
+            result.success = false;
+            result.error = QString("JSON parse error: %1").arg(parse_err.errorString());
+            LOG_ERROR("GovDataService", result.error);
+            emit self->result_ready(request_id, result);
+            return;
+        }
+
+        result.success = true;
+        result.data = doc.object();
+
+        // Cache the result
+        fiorch::CacheManager::instance().put(
+            key, QVariant(QString::fromUtf8(QJsonDocument(result.data).toJson(QJsonDocument::Compact))), kCacheTtlSec,
+            "govdata");
+
+        LOG_INFO("GovDataService", QString("Result ready: %1").arg(request_id));
+        emit self->result_ready(request_id, result);
+        if (self->hub_registered_) {
+            const QString topic = GovDataService::hub_topic(script, request_id);
+            fiorch::datahub::DataHub::instance().publish(topic, QVariant::fromValue(result));
+        }
+    });
+}
+
+// ── DataHub producer wiring ─────────────────────────────────────────────────
+
+QString GovDataService::hub_topic(const QString& script, const QString& request_id) {
+    // Map script filename → provider id when possible; fall back to the
+    // script name stripped of extension.
+    QString provider_key;
+    for (const auto& p : kProviders) {
+        if (p.script == script) {
+            provider_key = p.id;
+            break;
+        }
+    }
+    if (provider_key.isEmpty()) {
+        provider_key = script;
+        if (provider_key.endsWith(QLatin1String(".py")))
+            provider_key.chop(3);
+    }
+    return QStringLiteral("govdata:") + provider_key + QLatin1Char(':') + request_id;
+}
+
+QStringList GovDataService::topic_patterns() const {
+    return {QStringLiteral("govdata:*")};
+}
+
+void GovDataService::refresh(const QStringList& topics) {
+    for (const auto& topic : topics) {
+        auto it = dispatch_records_.constFind(topic);
+        if (it == dispatch_records_.constEnd()) {
+            LOG_DEBUG("GovDataService",
+                      "refresh() for unknown topic (no prior execute): " + topic);
+            continue;
+        }
+        const DispatchRecord rec = it.value();
+        fiorch::CacheManager::instance().remove(cache_key(rec.script, rec.command, rec.args));
+        execute(rec.script, rec.command, rec.args, rec.request_id);
+    }
+}
+
+int GovDataService::max_requests_per_sec() const {
+    return 2;
+}
+
+void GovDataService::ensure_registered_with_hub() {
+    if (hub_registered_) return;
+    auto& hub = fiorch::datahub::DataHub::instance();
+    hub.register_producer(this);
+
+    // 1-hour TTL, 60s min_interval — same as economics (govdata updates slowly).
+    fiorch::datahub::TopicPolicy policy;
+    policy.ttl_ms = 60 * 60 * 1000;
+    policy.min_interval_ms = 60 * 1000;
+    policy.push_only = false;
+    hub.set_policy_pattern(QStringLiteral("govdata:*"), policy);
+
+    hub_registered_ = true;
+    LOG_INFO("GovDataService", "Registered with DataHub (govdata:*)");
+}
+
+} // namespace fiorch::services

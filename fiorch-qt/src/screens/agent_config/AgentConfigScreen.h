@@ -1,0 +1,94 @@
+// src/screens/agent_config/AgentConfigScreen.h
+#pragma once
+#include "screens/common/IStatefulScreen.h"
+#include "services/agents/AgentTypes.h"
+
+#include <QLabel>
+#include <QPushButton>
+#include <QStackedWidget>
+#include <QVBoxLayout>
+#include <QWidget>
+
+// Forward-declare all panels — constructed lazily on first navigation
+namespace fiorch::screens {
+class AgentsViewPanel;
+class CreateAgentPanel;
+class TeamsViewPanel;
+class WorkflowsViewPanel;
+class PlannerViewPanel;
+class ToolsViewPanel;
+class AgentChatPanel;
+class SystemViewPanel;
+class AgenticTasksPanel;
+} // namespace fiorch::screens
+
+namespace fiorch::screens {
+
+/// Main Agent Studio screen — 8-view navigation shell.
+/// Panels are constructed lazily on first navigation (P2 compliance).
+class AgentConfigScreen : public QWidget, public IStatefulScreen {
+    Q_OBJECT
+  public:
+    explicit AgentConfigScreen(QWidget* parent = nullptr);
+
+    // IStatefulScreen — persists the currently active sub-view so users
+    // return to the same panel after restart.
+    QVariantMap save_state() const override;
+    void restore_state(const QVariantMap& state) override;
+    QString state_key() const override { return "agent_config"; }
+
+  protected:
+    void showEvent(QShowEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
+    void changeEvent(QEvent* event) override;
+
+  private:
+    void build_ui();
+    void build_nav_bar(QVBoxLayout* root);
+    void build_status_bar(QVBoxLayout* root);
+    void setup_service_connections();
+    void set_view(services::AgentViewMode mode);
+    QPushButton* make_nav_btn(const QString& text, services::AgentViewMode mode);
+
+    void ensure_panel_built(services::AgentViewMode mode);
+    QWidget* panel_widget(services::AgentViewMode mode) const;
+    void wire_cross_panel_signals();
+
+    QStackedWidget* view_stack_ = nullptr;
+    QVector<QPushButton*> nav_buttons_;
+    QLabel* status_label_ = nullptr;
+    QLabel* agent_count_label_ = nullptr;
+    QLabel* title_label_ = nullptr;
+    QLabel* view_label_ = nullptr;
+
+    /// Tracks the last agent count reported by AgentService so retranslateUi()
+    /// can rebuild the "%1 agents" badge in the new locale without waiting
+    /// for the next discovery cycle.
+    int last_agent_count_ = 0;
+
+    void retranslateUi();
+
+    // Lazily constructed panels (nullptr until first navigation)
+    AgentsViewPanel* agents_panel_ = nullptr;
+    CreateAgentPanel* create_panel_ = nullptr;
+    TeamsViewPanel* teams_panel_ = nullptr;
+    WorkflowsViewPanel* workflows_panel_ = nullptr;
+    PlannerViewPanel* planner_panel_ = nullptr;
+    ToolsViewPanel* tools_panel_ = nullptr;
+    AgentChatPanel* chat_panel_ = nullptr;
+    SystemViewPanel* system_panel_ = nullptr;
+    AgenticTasksPanel* agentic_panel_ = nullptr;
+
+    // Track which stack slots have been populated (one per AgentViewMode value).
+    bool panel_built_[9] = {};
+    // Nav-button index for the AGENTIC tab — kept so the visibility toggle
+    // (Settings > Developer > Agentic Mode) can show/hide it at runtime.
+    int agentic_nav_idx_ = -1;
+    bool agentic_mode_enabled_ = false;
+    void apply_agentic_visibility();
+
+    services::AgentViewMode current_view_ = services::AgentViewMode::Agents;
+    bool first_show_ = true;
+};
+
+} // namespace fiorch::screens

@@ -1,0 +1,372 @@
+// src/screens/equity_research/EquityResearchScreen.cpp
+#include "screens/equity_research/EquityResearchScreen.h"
+
+#include "core/events/EventBus.h"
+#include "core/session/ScreenStateManager.h"
+#include "core/symbol/SymbolContext.h"
+#include "core/symbol/SymbolDragSource.h"
+#include "screens/equity_research/EquityAnalysisTab.h"
+#include "screens/equity_research/EquityFinancialsTab.h"
+#include "screens/equity_research/EquityNewsTab.h"
+#include "screens/equity_research/EquityOverviewTab.h"
+#include "screens/equity_research/EquityPeersTab.h"
+#include "screens/equity_research/EquitySentimentTab.h"
+#include "screens/equity_research/EquityTalippTab.h"
+#include "screens/equity_research/EquityTechnicalsTab.h"
+#include "services/equity/EquityResearchService.h"
+#include "ui/theme/Theme.h"
+
+#include <QApplication>
+#include <QEvent>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+
+namespace fiorch::screens {
+
+EquityResearchScreen::EquityResearchScreen(QWidget* parent) : QWidget(parent) {
+    build_ui();
+    retranslateUi();
+
+    // Refresh timer — only started in showEvent
+    refresh_timer_ = new QTimer(this);
+    refresh_timer_->setInterval(30 * 1000); // 30s quote refresh
+    connect(refresh_timer_, &QTimer::timeout, this, [this]() {
+        if (!current_symbol_.isEmpty())
+            services::equity::EquityResearchService::instance().load_symbol(current_symbol_);
+    });
+
+    // Wire service signals
+    auto& svc = services::equity::EquityResearchService::instance();
+    connect(&svc, &services::equity::EquityResearchService::quote_loaded, this, &EquityResearchScreen::on_quote_loaded);
+    connect(&svc, &services::equity::EquityResearchService::info_loaded, this, &EquityResearchScreen::on_info_loaded);
+
+    // Listen for navigation from CommandBar asset search
+    EventBus::instance().subscribe("equity_research.load_symbol", [this](const QVariantMap& payload) {
+        const QString symbol = payload.value("symbol").toString();
+        if (!symbol.isEmpty())
+            load_symbol(symbol);
+    });
+
+    // Default symbol
+    load_symbol("AAPL");
+
+    // Drop any dragged symbol onto the screen to jump the research view
+    // to that ticker. Uses the existing load_symbol path so caching,
+    // signals, and the EventBus publish stay consistent.
+    symbol_dnd::installDropFilter(this, [this](const SymbolRef& ref, SymbolGroup) {
+        if (ref.is_valid())
+            load_symbol(ref.symbol);
+    });
+}
+
+void EquityResearchScreen::showEvent(QShowEvent* e) {
+    QWidget::showEvent(e);
+    refresh_timer_->start();
+}
+
+void EquityResearchScreen::hideEvent(QHideEvent* e) {
+    QWidget::hideEvent(e);
+    refresh_timer_->stop();
+}
+
+// ── UI construction ───────────────────────────────────────────────────────────
+void EquityResearchScreen::build_ui() {
+    setStyleSheet(QString("background:%1; color:%2;").arg(ui::colors::BG_BASE(), ui::colors::TEXT_PRIMARY()));
+
+    auto* vl = new QVBoxLayout(this);
+    vl->setContentsMargins(0, 0, 0, 0);
+    vl->setSpacing(0);
+
+    vl->addWidget(build_title_bar());
+    vl->addWidget(build_quote_bar());
+
+    // ── Tabs ─────────────────────────────────────────────────────────────────
+    tab_widget_ = new QTabWidget;
+    tab_widget_->setDocumentMode(true);
+    tab_widget_->setStyleSheet(QString(R"(
+        QTabWidget::pane { border:0; background:%1; }
+        QTabBar::tab {
+            background:%2; color:%3; padding:8px 18px;
+            border:0; border-bottom:2px solid transparent;
+            font-size:12px; text-transform:uppercase; letter-spacing:1px;
+        }
+        QTabBar::tab:selected { color:%4; border-bottom:2px solid %4; }
+        QTabBar::tab:hover { color:%5; }
+    )")
+                                   .arg(ui::colors::BG_BASE(), ui::colors::BG_SURFACE(), ui::colors::TEXT_SECONDARY(),
+                                        ui::colors::AMBER(), ui::colors::TEXT_PRIMARY()));
+
+    overview_tab_ = new EquityOverviewTab;
+    financials_tab_ = new EquityFinancialsTab;
+    analysis_tab_ = new EquityAnalysisTab;
+    technicals_tab_ = new EquityTechnicalsTab;
+    talipp_tab_ = new EquityTalippTab;
+    peers_tab_ = new EquityPeersTab;
+    news_tab_ = new EquityNewsTab;
+    sentiment_tab_ = new EquitySentimentTab;
+
+    // Tab titles are re-set by retranslateUi(); add with placeholder strings
+    // first so the tab order remains fixed regardless of locale text width.
+    tab_widget_->addTab(overview_tab_,   QString());
+    tab_widget_->addTab(financials_tab_, QString());
+    tab_widget_->addTab(analysis_tab_,   QString());
+    tab_widget_->addTab(technicals_tab_, QString());
+    tab_widget_->addTab(talipp_tab_,     QString());
+    tab_widget_->addTab(peers_tab_,      QString());
+    tab_widget_->addTab(news_tab_,       QString());
+    tab_widget_->addTab(sentiment_tab_,  QString());
+
+    connect(tab_widget_, &QTabWidget::currentChanged, this, &EquityResearchScreen::on_tab_changed);
+
+    vl->addWidget(tab_widget_, 1);
+}
+
+QWidget* EquityResearchScreen::build_title_bar() {
+    auto* container = new QWidget(this);
+    container->setFixedHeight(48);
+    container->setStyleSheet(
+        QString("background:%1; border-bottom:1px solid %2;").arg(ui::colors::BG_SURFACE(), ui::colors::BORDER_DIM()));
+
+    auto* hl = new QHBoxLayout(container);
+    hl->setContentsMargins(16, 8, 16, 8);
+    hl->setSpacing(12);
+
+    title_label_ = new QLabel;
+    title_label_->setStyleSheet(
+        QString("color:%1; font-size:14px; font-weight:700; letter-spacing:2px;").arg(ui::colors::AMBER()));
+    hl->addWidget(title_label_);
+
+    symbol_label_ = new QLabel;
+    symbol_label_->setStyleSheet(QString("color:%1; font-size:14px; font-weight:600;").arg(ui::colors::TEXT_PRIMARY()));
+    symbol_label_->setCursor(Qt::OpenHandCursor);
+    // Drag-out: pull the current symbol from the live member so the filter
+    // always ships the most recent ticker, not whatever was loaded at build.
+    symbol_dnd::installDragSource(
+        symbol_label_,
+        [this]() { return current_symbol(); },
+        link_group_);
+    hl->addWidget(symbol_label_);
+
+    hl->addStretch();
+
+    hint_label_ = new QLabel;
+    hint_label_->setStyleSheet(QString("color:%1; font-size:12px;").arg(ui::colors::TEXT_TERTIARY()));
+    hl->addWidget(hint_label_);
+
+    return container;
+}
+
+QWidget* EquityResearchScreen::build_quote_bar() {
+    auto* bar = new QFrame;
+    bar->setFixedHeight(44);
+    bar->setStyleSheet(
+        QString("background:%1; border-bottom:1px solid %2;").arg(ui::colors::BG_RAISED(), ui::colors::BORDER_DIM()));
+
+    auto* hl = new QHBoxLayout(bar);
+    hl->setContentsMargins(16, 0, 16, 0);
+    hl->setSpacing(24);
+
+    auto make_label = [&](const QString& txt, const QString& color = "") -> QLabel* {
+        auto* l = new QLabel(txt);
+        QString style = "font-size:13px; font-weight:600;";
+        if (!color.isEmpty())
+            style += "color:" + color + ";";
+        else
+            style += "color:" + QString(ui::colors::TEXT_SECONDARY()) + ";";
+        l->setStyleSheet(style);
+        hl->addWidget(l);
+        return l;
+    };
+
+    // Em-dash placeholders are typographic, not text — left raw. The VOL/H/L/
+    // MKT CAP prefixes are translated via retranslateUi().
+    sym_label_ = make_label(QStringLiteral("—"), ui::colors::AMBER());
+    price_label_ = make_label(QStringLiteral("—"), ui::colors::TEXT_PRIMARY());
+    change_label_ = make_label(QStringLiteral("—"));
+    vol_label_ = make_label(QString());
+    hl_label_ = make_label(QString());
+    mktcap_label_ = make_label(QString());
+    rec_label_ = make_label(QStringLiteral("—"));
+    hl->addStretch();
+
+    return bar;
+}
+
+// ── Slots ─────────────────────────────────────────────────────────────────────
+void EquityResearchScreen::on_quote_loaded(services::equity::QuoteData q) {
+    update_quote_bar(q);
+}
+
+void EquityResearchScreen::on_info_loaded(services::equity::StockInfo info) {
+    if (info.symbol != current_symbol_)
+        return;
+    current_currency_ = info.currency;
+}
+
+void EquityResearchScreen::on_tab_changed(int index) {
+    ScreenStateManager::instance().notify_changed(this);
+    if (current_symbol_.isEmpty())
+        return;
+
+    auto& svc = services::equity::EquityResearchService::instance();
+
+    switch (index) {
+        case 1:
+            financials_tab_->set_symbol(current_symbol_);
+            svc.fetch_financials(current_symbol_);
+            break;
+        case 2:
+            analysis_tab_->set_symbol(current_symbol_);
+            // Re-trigger load_symbol — cache will re-emit info_loaded immediately
+            svc.load_symbol(current_symbol_);
+            break;
+        case 3:
+            technicals_tab_->set_symbol(current_symbol_);
+            svc.fetch_technicals(current_symbol_);
+            break;
+        case 4:
+            talipp_tab_->set_symbol(current_symbol_);
+            break;
+        case 5:
+            peers_tab_->set_symbol(current_symbol_);
+            break;
+        case 6:
+            news_tab_->set_symbol(current_symbol_);
+            svc.fetch_news(current_symbol_);
+            break;
+        case 7:
+            sentiment_tab_->set_symbol(current_symbol_);
+            break;
+        default:
+            break;
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+void EquityResearchScreen::load_symbol(const QString& symbol) {
+    if (symbol.isEmpty() || symbol == current_symbol_)
+        return;
+    current_symbol_ = symbol;
+
+    // Update title bar and quote bar
+    symbol_label_->setText(symbol);
+    sym_label_->setText(symbol);
+    price_label_->setText(tr("Loading…"));
+
+    // Overview always loads (tab 0 is default)
+    overview_tab_->set_symbol(symbol);
+
+    // Load data for currently active tab
+    on_tab_changed(tab_widget_->currentIndex());
+
+    // Trigger quote + info + historical
+    services::equity::EquityResearchService::instance().load_symbol(symbol);
+
+    // Publish to linked group so Watchlist/EquityTrading/News/etc. follow.
+    if (link_group_ != SymbolGroup::None) {
+        SymbolContext::instance().set_group_symbol(
+            link_group_, SymbolRef::equity(symbol), this);
+    }
+}
+
+// ── IGroupLinked ─────────────────────────────────────────────────────────────
+
+void EquityResearchScreen::on_group_symbol_changed(const SymbolRef& ref) {
+    if (ref.is_valid())
+        load_symbol(ref.symbol);
+}
+
+SymbolRef EquityResearchScreen::current_symbol() const {
+    if (current_symbol_.isEmpty())
+        return {};
+    return SymbolRef::equity(current_symbol_);
+}
+
+void EquityResearchScreen::update_quote_bar(const services::equity::QuoteData& q) {
+    if (q.symbol != current_symbol_)
+        return;
+
+    const QString cs = EquityOverviewTab::currency_symbol(current_currency_.isEmpty() ? "USD" : current_currency_);
+
+    sym_label_->setText(q.symbol);
+    price_label_->setText(QString("%1%2").arg(cs).arg(q.price, 0, 'f', 2));
+
+    bool up = q.change_pct >= 0;
+    QString arrow = up ? "\xe2\x96\xb2" : "\xe2\x96\xbc";
+    QString chg_color = up ? ui::colors::POSITIVE() : ui::colors::NEGATIVE();
+    change_label_->setText(QString("%1%2  %3%4%")
+                               .arg(up ? "+" : "")
+                               .arg(q.change, 0, 'f', 2)
+                               .arg(arrow)
+                               .arg(qAbs(q.change_pct), 0, 'f', 2));
+    change_label_->setStyleSheet(QString("font-size:13px; font-weight:600; color:%1;").arg(chg_color));
+
+    auto fmt_vol = [](double v) -> QString {
+        if (v >= 1e9)
+            return QString("%1B").arg(v / 1e9, 0, 'f', 1);
+        if (v >= 1e6)
+            return QString("%1M").arg(v / 1e6, 0, 'f', 1);
+        if (v >= 1e3)
+            return QString("%1K").arg(v / 1e3, 0, 'f', 0);
+        return QString::number(static_cast<qint64>(v));
+    };
+
+    vol_label_->setText(tr("VOL: %1").arg(fmt_vol(q.volume)));
+    hl_label_->setText(tr("H:%1%2  L:%1%3").arg(cs).arg(q.high, 0, 'f', 2).arg(q.low, 0, 'f', 2));
+}
+
+// ── Re-translation ───────────────────────────────────────────────────────────
+// The quote bar is mostly numeric data — only the label prefixes (VOL/H/L,
+// MKT CAP) need localization. update_quote_bar() rewrites VOL/H/L on every
+// quote refresh, so when the language changes the next refresh will pick up
+// the new prefix automatically. MKT CAP shows "MKT CAP: —" until populated;
+// retranslate handles the placeholder.
+
+void EquityResearchScreen::changeEvent(QEvent* event) {
+    if (event->type() == QEvent::LanguageChange) {
+        retranslateUi();
+    }
+    QWidget::changeEvent(event);
+}
+
+void EquityResearchScreen::retranslateUi() {
+    if (title_label_)  title_label_->setText(tr("EQUITY RESEARCH"));
+    if (symbol_label_) symbol_label_->setToolTip(tr("Drag to broadcast this symbol to any panel"));
+    if (hint_label_)   hint_label_->setText(tr("Use /stock, /fund, /index... in command bar to search"));
+
+    if (vol_label_)    vol_label_->setText(tr("VOL: %1").arg(QStringLiteral("—")));
+    if (hl_label_)     hl_label_->setText(tr("H/L: %1").arg(QStringLiteral("—")));
+    if (mktcap_label_) mktcap_label_->setText(tr("MKT CAP: %1").arg(QStringLiteral("—")));
+
+    if (tab_widget_) {
+        tab_widget_->setTabText(0, tr("Overview"));
+        tab_widget_->setTabText(1, tr("Financials"));
+        tab_widget_->setTabText(2, tr("Analysis"));
+        tab_widget_->setTabText(3, tr("Technicals"));
+        // "TALIpp" is a library name — kept verbatim across locales.
+        tab_widget_->setTabText(4, QStringLiteral("TALIpp"));
+        tab_widget_->setTabText(5, tr("Peers"));
+        tab_widget_->setTabText(6, tr("News"));
+        tab_widget_->setTabText(7, tr("Sentiment"));
+    }
+}
+
+QVariantMap EquityResearchScreen::save_state() const {
+    return {{"symbol", current_symbol_}, {"tab_index", tab_widget_ ? tab_widget_->currentIndex() : 0}};
+}
+
+void EquityResearchScreen::restore_state(const QVariantMap& state) {
+    const QString sym = state.value("symbol").toString();
+    if (!sym.isEmpty()) {
+        current_symbol_ = sym;
+        services::equity::EquityResearchService::instance().load_symbol(sym);
+    }
+    if (tab_widget_) {
+        const int idx = state.value("tab_index", 0).toInt();
+        if (idx >= 0 && idx < tab_widget_->count())
+            tab_widget_->setCurrentIndex(idx);
+    }
+}
+
+} // namespace fiorch::screens

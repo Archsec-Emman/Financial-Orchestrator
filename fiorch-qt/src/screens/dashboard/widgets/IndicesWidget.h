@@ -1,0 +1,20 @@
+#pragma once
+#include "screens/dashboard/widgets/QuoteTableWidget.h"
+
+#include <QCoreApplication>
+
+namespace fiorch::screens::widgets {
+
+/// Global indices widget — fetches 12 major indices via yfinance.
+inline QuoteTableWidget* create_indices_widget(QWidget* parent = nullptr) {
+    QMap<QString, QString> labels = {
+        {"^GSPC", "S&P 500"},  {"^DJI", "DOW JONES"},     {"^IXIC", "NASDAQ"},  {"^RUT", "RUSSELL 2000"},
+        {"^FTSE", "FTSE 100"}, {"^GDAXI", "DAX"},         {"^FCHI", "CAC 40"},  {"^N225", "NIKKEI 225"},
+        {"^HSI", "HANG SENG"}, {"000001.SS", "SHANGHAI"}, {"^BSESN", "SENSEX"}, {"^NSEI", "NIFTY 50"},
+    };
+    const QString title = QCoreApplication::translate("fiorch::screens::widgets::QuoteTableWidget", "GLOBAL INDICES");
+    return new QuoteTableWidget(title, services::MarketDataService::indices_symbols(), labels, 2, {},
+                                parent);
+}
+
+} // namespace fiorch::screens::widgets

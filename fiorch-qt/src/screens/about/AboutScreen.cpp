@@ -1,0 +1,414 @@
+#include "screens/about/AboutScreen.h"
+
+#include "core/config/AppPaths.h"
+#include "services/updater/UpdateService.h"
+#include "ui/theme/Theme.h"
+
+#include <QApplication>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QUrl>
+#include <QVBoxLayout>
+
+namespace fiorch::screens {
+
+// ── Style constants ───────────────────────────────────────────────────────────
+
+static QString SECTION_LABEL() {
+    return QString("color: %1; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; "
+                   "text-transform: uppercase; background: transparent; "
+                   "font-family: 'Consolas','Courier New',monospace;")
+        .arg(ui::colors::TEXT_SECONDARY());
+}
+
+static QString BODY() {
+    return QString("color: %1; font-size: 13px; background: transparent; "
+                   "font-family: 'Consolas','Courier New',monospace;")
+        .arg(ui::colors::TEXT_PRIMARY());
+}
+
+static QString MUTED() {
+    return QString("color: %1; font-size: 12px; background: transparent; "
+                   "font-family: 'Consolas','Courier New',monospace;")
+        .arg(ui::colors::TEXT_TERTIARY());
+}
+
+static QString LINK_STYLE() {
+    return QString("color: %1; font-size: 13px; background: transparent; "
+                   "font-family: 'Consolas','Courier New',monospace;")
+        .arg(ui::colors::CYAN());
+}
+
+static QString PANEL() {
+    return QString("background: %1; border: 1px solid %2; border-radius: 2px;")
+        .arg(ui::colors::BG_SURFACE(), ui::colors::BORDER_DIM());
+}
+
+static QString LINK_BTN() {
+    return QString("QPushButton { background: %1; color: %2; border: 1px solid %3; "
+                   "border-radius: 2px; padding: 8px 12px; font-size: 12px; text-align: left; "
+                   "font-family: 'Consolas','Courier New',monospace; }"
+                   "QPushButton:hover { background: %4; color: #38bdf8; }")
+        .arg(ui::colors::BG_RAISED(), ui::colors::CYAN(), ui::colors::BORDER_DIM(), ui::colors::BG_HOVER());
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+static QWidget* makePanel() {
+    auto* w = new QWidget(nullptr);
+    w->setStyleSheet(PANEL());
+    return w;
+}
+
+static QLabel* makePanelHeader(const QString& icon, const QString& title, const QString& iconColor) {
+    auto* lbl = new QLabel(QString("%1  %2").arg(icon, title));
+    lbl->setStyleSheet(QString("color: %1; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; "
+                               "background: %2; padding: 10px 14px; border-bottom: 1px solid %3; "
+                               "font-family: 'Consolas','Courier New',monospace;")
+                           .arg(iconColor, ui::colors::BG_RAISED(), ui::colors::BORDER_DIM()));
+    return lbl;
+}
+
+static QLabel* makeBullet(const QString& text) {
+    auto* lbl = new QLabel(QString("■  %1").arg(text));
+    lbl->setStyleSheet(QString("color: %1; font-size: 12px; background: transparent; "
+                               "font-family: 'Consolas','Courier New',monospace;")
+                           .arg(ui::colors::TEXT_SECONDARY()));
+    lbl->setWordWrap(true);
+    return lbl;
+}
+
+// ── Constructor ───────────────────────────────────────────────────────────────
+
+AboutScreen::AboutScreen(QWidget* parent) : QWidget(parent) {
+    setStyleSheet(QString("QWidget#AboutRoot { background: %1; }").arg(ui::colors::BG_BASE()));
+    setObjectName("AboutRoot");
+
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+
+    // ── Scrollable content ────────────────────────────────────────────────────
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setStyleSheet("QScrollArea { border: none; background: transparent; }");
+
+    auto* page = new QWidget(this);
+    page->setStyleSheet(QString("background: %1;").arg(ui::colors::BG_BASE()));
+    auto* vl = new QVBoxLayout(page);
+    vl->setContentsMargins(24, 24, 24, 24);
+    vl->setSpacing(12);
+
+    // ── Version Information ───────────────────────────────────────────────────
+    {
+        auto* panel = makePanel();
+        auto* pvl = new QVBoxLayout(panel);
+        pvl->setContentsMargins(0, 0, 0, 0);
+        pvl->setSpacing(0);
+
+        pvl->addWidget(makePanelHeader("ℹ", "VERSION INFORMATION", ui::colors::AMBER));
+
+        auto* body = new QWidget(this);
+        body->setStyleSheet("background: transparent;");
+        auto* bhl = new QHBoxLayout(body);
+        bhl->setContentsMargins(14, 12, 14, 12);
+
+        auto* left = new QVBoxLayout;
+        left->setSpacing(4);
+        auto* name = new QLabel("Financial Orchestrator");
+        name->setStyleSheet(QString("color: %1; font-size: 15px; font-weight: bold; background: transparent; "
+                                    "font-family: 'Consolas','Courier New',monospace;")
+                                .arg(ui::colors::TEXT_PRIMARY()));
+        left->addWidget(name);
+        auto* sub = new QLabel("NATIVE DESKTOP FINANCIAL INTELLIGENCE TERMINAL");
+        sub->setStyleSheet(MUTED());
+        left->addWidget(sub);
+        bhl->addLayout(left);
+        bhl->addStretch();
+
+        auto* right = new QVBoxLayout;
+        right->setSpacing(4);
+        right->setAlignment(Qt::AlignRight);
+        auto* ver = new QLabel(QStringLiteral("v%1").arg(QApplication::applicationVersion()));
+        ver->setStyleSheet(QString("color: %1; font-size: 18px; font-weight: bold; background: transparent; "
+                                   "font-family: 'Consolas','Courier New',monospace;")
+                               .arg(ui::colors::AMBER()));
+        ver->setAlignment(Qt::AlignRight);
+        right->addWidget(ver);
+
+        // Check-for-updates button — user-initiated, always shows a result dialog.
+        auto* check_btn = new QPushButton(QStringLiteral("Check for Updates"));
+        check_btn->setStyleSheet(LINK_BTN());
+        check_btn->setCursor(Qt::PointingHandCursor);
+        connect(check_btn, &QPushButton::clicked, this, [this, check_btn]() {
+            check_btn->setEnabled(false);
+            check_btn->setText(QStringLiteral("Checking…"));
+            auto& svc = services::UpdateService::instance();
+            svc.set_dialog_parent(window());
+            // Re-enable the button when the check completes. Using a unique
+            // connection is fine since the service is a long-lived singleton.
+            connect(&svc, &services::UpdateService::check_finished, check_btn,
+                    [check_btn](bool /*found*/) {
+                        check_btn->setEnabled(true);
+                        check_btn->setText(QStringLiteral("Check for Updates"));
+                    },
+                    Qt::SingleShotConnection);
+            svc.check_for_updates(/*silent=*/false);
+        });
+        right->addWidget(check_btn);
+        bhl->addLayout(right);
+
+        pvl->addWidget(body);
+
+        // Footer bar
+        foot->setStyleSheet(QString("color: %1; font-size: 11px; background: %2; "
+                                    "padding: 6px 14px; border-top: 1px solid %3; "
+                                    "font-family: 'Consolas','Courier New',monospace;")
+                                .arg(ui::colors::TEXT_TERTIARY(), ui::colors::BG_RAISED(), ui::colors::BORDER_DIM()));
+        pvl->addWidget(foot);
+
+        vl->addWidget(panel);
+    }
+
+    // ── License — two columns ─────────────────────────────────────────────────
+    {
+        auto* row = new QWidget(this);
+        row->setStyleSheet("background: transparent;");
+        auto* rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(12);
+
+        // Open Source
+        {
+            auto* panel = makePanel();
+            auto* pvl = new QVBoxLayout(panel);
+            pvl->setContentsMargins(0, 0, 0, 0);
+            pvl->setSpacing(0);
+            pvl->addWidget(makePanelHeader("📄", "OPEN SOURCE LICENSE", ui::colors::POSITIVE));
+
+            auto* body = new QWidget(this);
+            body->setStyleSheet("background: transparent;");
+            auto* bvl = new QVBoxLayout(body);
+            bvl->setContentsMargins(14, 10, 14, 10);
+            bvl->setSpacing(6);
+            bvl->addWidget(makeBullet("AGPL-3.0-or-later"));
+            bvl->addWidget(makeBullet("Free for personal & educational use"));
+            bvl->addWidget(makeBullet("Share modifications under same license"));
+            bvl->addWidget(makeBullet("Network use counts as distribution"));
+            pvl->addWidget(body);
+
+            // Footer link
+            auto* foot = new QLabel("gnu.org/licenses/agpl-3.0");
+            foot->setStyleSheet(QString("color: %1; font-size: 11px; background: transparent; "
+                                        "padding: 6px 14px; border-top: 1px solid %2; "
+                                        "font-family: 'Consolas','Courier New',monospace;")
+                                    .arg(ui::colors::CYAN(), ui::colors::BORDER_DIM()));
+            pvl->addWidget(foot);
+
+            rl->addWidget(panel, 1);
+        }
+
+        // Commercial
+        {
+            auto* panel = makePanel();
+            auto* pvl = new QVBoxLayout(panel);
+            pvl->setContentsMargins(0, 0, 0, 0);
+            pvl->setSpacing(0);
+            pvl->addWidget(makePanelHeader("★", "COMMERCIAL LICENSE", ui::colors::AMBER));
+
+            auto* body = new QWidget(this);
+            body->setStyleSheet("background: transparent;");
+            auto* bvl = new QVBoxLayout(body);
+            bvl->setContentsMargins(14, 10, 14, 10);
+            bvl->setSpacing(6);
+            bvl->addWidget(makeBullet("Required for commercial deployment"));
+            bvl->addWidget(makeBullet("No source sharing required"));
+            bvl->addWidget(makeBullet("Priority support included"));
+            bvl->addWidget(makeBullet("Custom integration options available"));
+            pvl->addWidget(body);
+
+            // Footer link
+            auto* foot = new QLabel("support@fincept.in");
+            foot->setStyleSheet(QString("color: %1; font-size: 11px; background: transparent; "
+                                        "padding: 6px 14px; border-top: 1px solid %2; "
+                                        "font-family: 'Consolas','Courier New',monospace;")
+                                    .arg(ui::colors::CYAN(), ui::colors::BORDER_DIM()));
+            pvl->addWidget(foot);
+
+            rl->addWidget(panel, 1);
+        }
+
+        vl->addWidget(row);
+    }
+
+    // ── Diagnostics ───────────────────────────────────────────────────────────
+    // Surfaces the crash-dump folder path so users filing bug reports can
+    // attach minidumps without hunting through %LOCALAPPDATA% (see issue #215).
+    {
+        auto* panel = makePanel();
+        auto* pvl = new QVBoxLayout(panel);
+        pvl->setContentsMargins(0, 0, 0, 0);
+        pvl->setSpacing(0);
+        pvl->addWidget(makePanelHeader("⚙", "DIAGNOSTICS", ui::colors::AMBER));
+
+        auto* body = new QWidget(this);
+        body->setStyleSheet("background: transparent;");
+        auto* bhl = new QHBoxLayout(body);
+        bhl->setContentsMargins(14, 10, 14, 10);
+        bhl->setSpacing(12);
+
+        auto* left = new QVBoxLayout;
+        left->setSpacing(2);
+        auto* lbl = new QLabel("CRASH DUMPS");
+        lbl->setStyleSheet(SECTION_LABEL());
+        left->addWidget(lbl);
+        const QString crash_dir = QDir::toNativeSeparators(AppPaths::crashdumps());
+        auto* path = new QLabel(crash_dir);
+        path->setStyleSheet(MUTED());
+        path->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        path->setWordWrap(true);
+        left->addWidget(path);
+        bhl->addLayout(left, 1);
+
+        auto* open_btn = new QPushButton(QStringLiteral("Open Folder"));
+        open_btn->setStyleSheet(LINK_BTN());
+        open_btn->setCursor(Qt::PointingHandCursor);
+        connect(open_btn, &QPushButton::clicked, this, [crash_dir]() {
+            // mkpath is idempotent; ensures the folder exists before
+            // QDesktopServices::openUrl on a freshly installed terminal
+            // that hasn't crashed yet.
+            QDir().mkpath(crash_dir);
+            QDesktopServices::openUrl(QUrl::fromLocalFile(crash_dir));
+        });
+        bhl->addWidget(open_btn, 0, Qt::AlignTop);
+
+        pvl->addWidget(body);
+        vl->addWidget(panel);
+    }
+
+    // ── Trademarks ────────────────────────────────────────────────────────────
+    {
+        auto* panel = makePanel();
+        auto* pvl = new QVBoxLayout(panel);
+        pvl->setContentsMargins(0, 0, 0, 0);
+        pvl->setSpacing(0);
+        pvl->addWidget(makePanelHeader("🛡", "TRADEMARKS", ui::colors::AMBER));
+
+        auto* body = new QWidget(this);
+        body->setStyleSheet("background: transparent;");
+        auto* bvl = new QVBoxLayout(body);
+        bvl->setContentsMargins(14, 10, 14, 12);
+        bvl->setSpacing(6);
+
+        desc->setStyleSheet(BODY());
+        desc->setWordWrap(true);
+        bvl->addWidget(desc);
+
+        auto* perm =
+        perm->setStyleSheet(MUTED());
+        perm->setWordWrap(true);
+        bvl->addWidget(perm);
+
+        pvl->addWidget(body);
+        vl->addWidget(panel);
+    }
+
+    // ── Resources — 3×2 grid ─────────────────────────────────────────────────
+    {
+        auto* panel = makePanel();
+        auto* pvl = new QVBoxLayout(panel);
+        pvl->setContentsMargins(0, 0, 0, 0);
+        pvl->setSpacing(0);
+        pvl->addWidget(makePanelHeader("🌐", "RESOURCES", ui::colors::AMBER));
+
+        auto* body = new QWidget(this);
+        body->setStyleSheet("background: transparent;");
+        auto* grid = new QGridLayout(body);
+        grid->setContentsMargins(14, 10, 14, 12);
+        grid->setSpacing(8);
+
+        struct Link {
+            QString label;
+            QString url;
+        };
+        const Link links[] = {
+            {"GitHub Repository", "https://github.com/Archsec-Emman/FinancialOrchestrator"},
+            {"License (AGPL-3.0)", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/LICENSE"},
+             "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/COMMERCIAL_LICENSE.md"},
+            {"Trademark Policy", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/TRADEMARK.md"},
+            {"Contributor CLA", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/CLA.md"},
+            {"Official Website", "https://fincept.in"},
+        };
+
+        for (int i = 0; i < 6; ++i) {
+            auto* btn = new QPushButton(links[i].label);
+            btn->setStyleSheet(LINK_BTN());
+            btn->setFixedHeight(36);
+            const QString url = links[i].url;
+            connect(btn, &QPushButton::clicked, this, [url]() { QDesktopServices::openUrl(QUrl(url)); });
+            grid->addWidget(btn, i / 3, i % 3);
+        }
+
+        pvl->addWidget(body);
+        vl->addWidget(panel);
+    }
+
+    // ── Contact ───────────────────────────────────────────────────────────────
+    {
+        auto* panel = makePanel();
+        auto* pvl = new QVBoxLayout(panel);
+        pvl->setContentsMargins(0, 0, 0, 0);
+        pvl->setSpacing(0);
+        pvl->addWidget(makePanelHeader("✉", "CONTACT", ui::colors::AMBER));
+
+        auto* body = new QWidget(this);
+        body->setStyleSheet("background: transparent;");
+        auto* grid = new QGridLayout(body);
+        grid->setContentsMargins(14, 10, 14, 12);
+        grid->setSpacing(12);
+
+        struct Contact {
+            QString label;
+            QString email;
+        };
+        const Contact contacts[] = {
+            {"GENERAL", "support@fincept.in"},
+            {"COMMERCIAL", "support@fincept.in"},
+            {"SECURITY", "support@fincept.in"},
+            {"LEGAL", "support@fincept.in"},
+        };
+
+        for (int i = 0; i < 4; ++i) {
+            auto* col = new QWidget(this);
+            col->setStyleSheet("background: transparent;");
+            auto* cvl = new QVBoxLayout(col);
+            cvl->setContentsMargins(0, 0, 0, 0);
+            cvl->setSpacing(2);
+
+            auto* lbl = new QLabel(contacts[i].label);
+            lbl->setStyleSheet(SECTION_LABEL());
+            cvl->addWidget(lbl);
+
+            auto* email = new QLabel(contacts[i].email);
+            email->setStyleSheet(LINK_STYLE());
+            cvl->addWidget(email);
+
+            grid->addWidget(col, 0, i);
+        }
+
+        pvl->addWidget(body);
+        vl->addWidget(panel);
+    }
+
+    vl->addStretch();
+    scroll->setWidget(page);
+    root->addWidget(scroll, 1);
+}
+
+} // namespace fiorch::screens

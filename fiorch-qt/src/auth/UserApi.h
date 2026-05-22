@@ -1,0 +1,55 @@
+#pragma once
+#include "auth/AuthTypes.h"
+
+#include <QObject>
+
+#include <functional>
+
+namespace fiorch::auth {
+
+/// User profile, notifications, subscriptions, support.
+/// All methods use the api_key/session_token already set on HttpClient.
+class UserApi : public QObject {
+    Q_OBJECT
+  public:
+    using Callback = std::function<void(ApiResponse)>;
+
+    static UserApi& instance();
+
+    // Profile
+    void get_user_profile(Callback cb);
+    void update_user_profile(const QJsonObject& data, Callback cb);
+    void regenerate_api_key(Callback cb);
+    void get_user_usage(int days, Callback cb);
+    void get_user_credits(Callback cb);
+    void delete_user_account(const QString& confirm_email, const QString& password, Callback cb);
+
+    // Login history
+    void get_login_history(int limit, int offset, Callback cb);
+
+    // MFA
+    void enable_mfa(Callback cb);
+    void disable_mfa(Callback cb);
+
+    // Subscriptions
+    void get_user_subscription(Callback cb);
+
+    // Payment
+    void get_payment_history(int page, int limit, Callback cb);
+
+    // Support
+    void get_tickets(Callback cb);
+    void get_ticket_details(int ticket_id, Callback cb);
+    void create_ticket(const QString& subject, const QString& description, const QString& category,
+                       const QString& priority, Callback cb);
+    void add_ticket_message(int ticket_id, const QString& message, Callback cb);
+    void update_ticket_status(int ticket_id, const QString& status, Callback cb);
+    void get_support_categories(Callback cb);
+
+  private:
+    UserApi() = default;
+
+    void request(const QString& method, const QString& endpoint, const QJsonObject& body, Callback cb);
+};
+
+} // namespace fiorch::auth
