@@ -63,7 +63,7 @@ struct NodeTypeDef {
     QString type_id;      // e.g. "trigger.manual"
     QString display_name; // e.g. "Manual Trigger"
     QString category;     // e.g. "Triggers"
-    QString description;
+    QString description = QString();
     QString icon_text;    // 1-2 char icon, e.g. ">>"
     QString accent_color; // category color for header
     int version = 1;
