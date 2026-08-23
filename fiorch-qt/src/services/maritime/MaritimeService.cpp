@@ -443,6 +443,7 @@ void MaritimeService::refresh(const QStringList& topics) {
 }
 
 int MaritimeService::max_requests_per_sec() const {
+    return 2;
 }
 
 void MaritimeService::ensure_registered_with_hub() {

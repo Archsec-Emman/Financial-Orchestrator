@@ -33,6 +33,7 @@ constexpr const char* kOverpassEndpoint    = "https://overpass-api.de/api/interp
 // Cache TTL — UN/LOCODE / Wikidata port data drifts on a quarterly cadence.
 // Seven days keeps the screen snappy across launches without going stale.
 constexpr int kCacheTtlSec = 7 * 24 * 60 * 60;
+constexpr const char* kUserAgent = "FinancialOrchestrator/1.0 (ports catalog)";
 
 QString cache_key_for(const QString& kind, const QString& payload) {
     const auto hash = QCryptographicHash::hash(payload.toUtf8(), QCryptographicHash::Sha1).toHex().left(12);

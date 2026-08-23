@@ -496,6 +496,7 @@ void GeopoliticsService::refresh(const QStringList& topics) {
 }
 
 int GeopoliticsService::max_requests_per_sec() const {
+    return 2;
 }
 
 void GeopoliticsService::ensure_registered_with_hub() {
