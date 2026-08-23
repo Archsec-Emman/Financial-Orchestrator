@@ -16,52 +16,46 @@ A state‑of‑the‑art financial intelligence platform with institutional-grad
 
 ---
 
-## 📖 Overview
+## Overview
 
 Financial Orchestrator is a pure‑native C++20 desktop application. It uses **Qt6** for UI and rendering while embedding **Python 3.11.9** for analytics, delivering Bloomberg‑class performance in a single binary. It is designed for retail investors, quantitative analysts, researchers, and financial professionals who require deep analytical tools without proprietary data dependencies.
 
 ---
 
-## ✨ Features
+## Features
 
-### 📊 Multi‑Asset Analytics
+### Multi‑Asset Analytics
 DCF models, portfolio optimization, risk metrics (VaR, Sharpe), derivatives pricing across equity, fixed income, derivatives, portfolio, and alternatives.
 
-### 🤖 AI Agents
+### AI Agents
 37 agents across Trader/Investor frameworks (Buffett, Graham, Lynch, Munger, Klarman, Marks, …), plus Economic and Geopolitics frameworks. Supports local LLMs and multi‑provider integrations (OpenAI, Anthropic, Gemini, Groq, DeepSeek, MiniMax, OpenRouter, Ollama).
 
-### 🔌 100+ Data Connectors
+### 100+ Data Connectors
 Connects to DBnomics, Polygon, Kraken, Yahoo Finance, FRED, IMF, World Bank, AkShare, government APIs, and optional alternative‑data overlays.
 
-### 💹 Real‑Time Trading
+### Real‑Time Trading
 Crypto (Kraken/HyperLiquid WebSocket), equity, algo trading, paper trading engine, and 16 broker integrations.
 
-### 📈 QuantLib Suite
+### QuantLib Suite
 18 quantitative analysis modules — pricing, risk, stochastic, volatility, fixed income.
 
-### 🌍 Global Intelligence
+### Global Intelligence
 Maritime tracking, geopolitical analysis, relationship mapping, satellite data.
 
-### 🧩 Visual Workflows
+### Visual Workflows
 Node editor for automation pipelines and MCP tool integration.
 
-### 🧠 AI Quant Lab
+### AI Quant Lab
 ML models, factor discovery, HFT, reinforcement learning trading.
 
 ---
 
-## 🚀 Installation
+## Installation
 
-### Option 1 — Download Installer (Recommended)
-Download the latest installer for your platform from the [Releases](https://github.com/Archsec-Emman/Financial-Orchestrator/releases) page.
+### Release Status
 
-| Platform | Download |
-|----------|----------|
-| **Windows x64** | [FinancialOrchestrator‑Windows‑x64‑setup.exe](https://github.com/Archsec-Emman/Financial-Orchestrator/releases/download/v4.0.3/FinancialOrchestrator-4.0.3-windows-x64-setup.exe) |
-| **Linux x64** | [FinancialOrchestrator‑Linux‑x64.run](https://github.com/Archsec-Emman/Financial-Orchestrator/releases/download/v4.0.3/FinancialOrchestrator-4.0.3-linux-x64-setup.run) |
-| **macOS Apple Silicon** | [FinancialOrchestrator‑macOS‑arm64.dmg](https://github.com/Archsec-Emman/Financial-Orchestrator/releases/download/v4.0.3/FinancialOrchestrator-4.0.3-macos-arm64-setup.dmg) |
-
-### Option 2 — Quick Start (One‑Click Build)
+Pre-built installers are **not yet published** - the CI pipeline is being brought online first. Until a release tag appears on the [Releases](https://github.com/Archsec-Emman/Financial-Orchestrator/releases) page, build from source below.
+### Option 1 — Quick Start (One‑Click Build)
 Clone and run the setup script — it installs all dependencies and builds the app automatically:
 ```bash
 # Linux / macOS
@@ -73,7 +67,7 @@ The script handles: compiler check, CMake, Qt6, Python, build, and launch.
 
 > **Windows:** No setup script — use the manual build steps in Option 4 below.
 
-### Option 3 — Docker (CI / Developer Environments)
+### Option 2 — Docker (CI / Developer Environments)
 > **Note:** Docker is intended for CI/CD testing and development environments only. Linux with X11 is required; Windows and macOS are not supported.
 ```bash
 # Build from source (Linux + X11 required)
@@ -83,7 +77,7 @@ docker build -t fiorch-terminal .
 docker run --rm -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix fiorch-terminal
 ```
 
-### Option 4 — Build from Source (Manual)
+### Option 3 — Build from Source (Manual)
 > **Versions are pinned.** Use the exact versions below. Newer or older versions are unsupported and may fail to build.
 
 #### Prerequisites (exact versions)
@@ -96,9 +90,9 @@ docker run --rm -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix fiorch-term
 | **Python** | 3.11.9 |
 
 #### Install Qt 6.8.3
-- **Windows:** Qt Online Installer → select `Qt 6.8.3 > MSVC 2022 64‑bit` (install path: `C:/Qt/6.8.3/msvc2022_64`)
-- **Linux:** Qt Online Installer → `Qt 6.8.3 > Desktop gcc 64‑bit` (install path: `~/Qt/6.8.3/gcc_64`)
-- **macOS:** Qt Online Installer → `Qt 6.8.3 > macOS` (install path: `~/Qt/6.8.3/macos`)
+- Qt Online Installer → select `Qt 6.8.3 > MSVC 2022 64‑bit` (install path: `C:/Qt/6.8.3/msvc2022_64`)
+- Qt Online Installer → `Qt 6.8.3 > Desktop gcc 64‑bit` (install path: `~/Qt/6.8.3/gcc_64`)
+- Qt Online Installer → `Qt 6.8.3 > macOS` (install path: `~/Qt/6.8.3/macos`)
 
 #### Build (using CMake presets — recommended)
 ```bash
@@ -133,18 +127,18 @@ cmake --build build/macos-release  # macOS
 
 ---
 
-## 🧑‍💻 Usage
+## Usage
 
 After launching the application, you can:
-- **Connect to data sources** via the 100+ built‑in connectors.
-- **Run AI agents** to generate trade ideas and portfolio recommendations.
-- **Execute paper trades** or connect to any of the 16 supported brokers for real trading.
-- **Build visual pipelines** using the node editor for automation.
-- **Analyze quantitative models** using the QuantLib Suite or the AI Quant Lab.
+- to data sources** via the 100+ built‑in connectors.
+- AI agents** to generate trade ideas and portfolio recommendations.
+- paper trades** or connect to any of the 16 supported brokers for real trading.
+- visual pipelines** using the node editor for automation.
+- quantitative models** using the QuantLib Suite or the AI Quant Lab.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Financial-Orchestrator/
@@ -160,32 +154,32 @@ Financial-Orchestrator/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions: new data connectors, AI agents, analytics modules, C++ screens, and documentation. Please review the contributing guides:
-- [General Contributing Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/docs/CONTRIBUTING.md)
-- [C++ Contributing Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/fiorch-qt/CONTRIBUTING.md)
-- [Python Contributor Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/docs/PYTHON_CONTRIBUTOR_GUIDE.md)
+- Contributing Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/docs/CONTRIBUTING.md)
+- Contributing Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/fiorch-qt/CONTRIBUTING.md)
+- Contributor Guide](https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/docs/PYTHON_CONTRIBUTOR_GUIDE.md)
 
 **Report Bugs:** [GitHub Issues](https://github.com/Archsec-Emman/Financial-Orchestrator/issues)  
 **Request Features:** [Discussions](https://github.com/Archsec-Emman/Financial-Orchestrator/discussions)
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 📬 Contact & Support
+## Contact & Support
 
-- **GitHub Discussions:** [https://github.com/Archsec-Emman/Financial-Orchestrator/discussions](https://github.com/Archsec-Emman/Financial-Orchestrator/discussions)
-- **Author:** [Archsec-Emman](https://github.com/Archsec-Emman)
+- Discussions:** [https://github.com/Archsec-Emman/Financial-Orchestrator/discussions](https://github.com/Archsec-Emman/Financial-Orchestrator/discussions)
+- [Archsec-Emman](https://github.com/Archsec-Emman)
 
 ---
 
-## 🚧 Roadmap
+## Roadmap
 
 | Timeline | Milestone |
 |----------|-----------|
