@@ -604,6 +604,7 @@ void ReportBuilderService::set_current_file(const QString& path) {
 }
 
 void ReportBuilderService::persist_current_file() {
+    QSettings s;
     s.setValue(kCurrentFileKey, current_file_);
 }
 
@@ -625,11 +626,13 @@ void ReportBuilderService::trigger_autosave() {
 }
 
 void ReportBuilderService::load_recent() const {
+    QSettings s;
     recent_cache_ = s.value(kRecentKey).toStringList();
     recent_loaded_ = true;
 }
 
 void ReportBuilderService::save_recent() const {
+    QSettings s;
     s.setValue(kRecentKey, recent_cache_);
 }
 
