@@ -3233,6 +3233,7 @@ endif() # FIORCH_BUILD_INSTALLER
 # macOS: codesign + notarytool + stapler
 if(APPLE)
     set(FIORCH_MACOS_SIGN_IDENTITY "" CACHE STRING
+        "Apple codesign identity for macOS builds" FORCE)
     set(FIORCH_MACOS_NOTARY_APPLE_ID "" CACHE STRING "Apple ID for notarytool submission")
     set(FIORCH_MACOS_NOTARY_TEAM_ID  "" CACHE STRING "Apple Developer Team ID")
     set(FIORCH_MACOS_NOTARY_PASSWORD "" CACHE STRING "App-specific password for notarytool")
