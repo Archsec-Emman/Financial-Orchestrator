@@ -91,6 +91,7 @@ class UpdateService : public QObject {
     QWidget* dialog_parent();
 
     static constexpr const char* DEFAULT_MANIFEST_URL =
+        "https://raw.githubusercontent.com/Archsec-Emman/Financial-Orchestrator/master/updates.json";
 
     QNetworkAccessManager net_;
     QString manifest_url_ = DEFAULT_MANIFEST_URL;

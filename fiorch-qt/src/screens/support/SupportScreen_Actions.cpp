@@ -227,6 +227,7 @@ void SupportScreen::load_tickets() {
                     // not a live date. Translated for the localized month name.
                     mh->addWidget(lbl(tr("1 Jan 2026"), ui::colors::TEXT_TERTIARY(), 10));
                     ml->addLayout(mh);
+                    auto* mb = lbl(tr("Thanks for trying the support demo.\n\n"
                                       "Create a real ticket and our team will respond within 24 hours."),
                                    ui::colors::TEXT_PRIMARY(), 12, false, true);
                     ml->addWidget(mb);

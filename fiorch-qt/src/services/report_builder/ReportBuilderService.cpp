@@ -340,7 +340,10 @@ ReportBuilderService::ReportBuilderService() {
 
     // Restore current_file_ from settings so the title bar shows the right
     // path on relaunch. (The doc itself comes from autosave below.)
-    current_file_ = s.value(kCurrentFileKey).toString();
+    {
+        QSettings s;
+        current_file_ = s.value(kCurrentFileKey).toString();
+    }
 
     // Try to restore from autosave on construction. Failures are silent —
     // an empty doc is the correct fallback.

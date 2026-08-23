@@ -232,6 +232,7 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Single-instance lock + new-window IPC ────────────────────────────────
+    const QString profile_key = QStringLiteral("default");
     fiorch::InstanceLock instance_lock;
     const auto lock_status = instance_lock.acquire(profile_key, QCoreApplication::arguments());
 
@@ -383,6 +384,7 @@ int main(int argc, char* argv[]) {
                 std::make_unique<fiorch::services::prediction::kalshi_ns::KalshiAdapter>());
             // `fincept.markets_endpoint` is configured).
             reg.register_adapter(
+                std::make_unique<fiorch::services::prediction::kalshi_ns::KalshiAdapter>());
 
             // Hydrate credentials from SecureStorage if previously saved.
             if (auto* pm = dynamic_cast<fiorch::services::prediction::polymarket_ns::PolymarketAdapter*>(
@@ -527,6 +529,7 @@ int main(int argc, char* argv[]) {
         const QString local_dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
         const QString legacy1 = local_dir.section('/', 0, -3) + "/FinancialOrchestrator/fincept_settings.db";
         const QString legacy2 =
+            local_dir.section('/', 0, -3) + "/FinceptTerminal/fincept_settings.db";
         QFile::remove(legacy1 + "-wal");
         QFile::remove(legacy1 + "-shm");
         QFile::remove(legacy2 + "-wal");
