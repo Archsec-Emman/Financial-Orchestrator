@@ -10253,9 +10253,7 @@ Expected format:
         <source>Delete Account</source>
         <translation>删除账户</translation>
     </message>
-    <message>
-
-This action CANNOT be undone. Are you sure?</source>
+    <message>    <source>This action CANNOT be undone. Are you sure?</source>
 
 此操作无法撤销。确定继续吗？</translation>
     </message>

@@ -40,7 +40,7 @@ jobs:
             platform: Linux
             artifact: FinancialOrchestrator-Linux-x64
             exe: FinancialOrchestrator
-            qt_arch: ""
+            qt_arch: linux_gcc_64
             cmake_extra: ""
 
           # ---- macOS ARM64 (Apple Silicon) ----
@@ -124,9 +124,8 @@ jobs:
           echo "OpenSSL installed at: $OPENSSL_DIR"
           ls "$OPENSSL_DIR/lib/libcrypto.lib" && echo "libcrypto.lib confirmed"
 
-      # ---- Qt6 target (Windows/macOS) ----
+      # ---- Qt6 target (all platforms) ----
       - name: Install Qt6
-        if: runner.os != 'Linux'
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}

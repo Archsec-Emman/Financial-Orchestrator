@@ -10283,9 +10283,7 @@ Erwartetes Format:
         <source>Delete Failed</source>
         <translation>Löschen fehlgeschlagen</translation>
     </message>
-    <message>
-
-This action CANNOT be undone. Are you sure?</source>
+    <message>    <source>This action CANNOT be undone. Are you sure?</source>
         <translation type="unfinished" />
     </message>
     <message>

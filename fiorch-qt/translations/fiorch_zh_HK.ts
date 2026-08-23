@@ -10260,9 +10260,7 @@ Expected format:
         <source>Your current API key will be invalidated. Continue?</source>
         <translation type="unfinished" />
     </message>
-    <message>
-
-This action CANNOT be undone. Are you sure?</source>
+    <message>    <source>This action CANNOT be undone. Are you sure?</source>
         <translation type="unfinished" />
     </message>
     <message>

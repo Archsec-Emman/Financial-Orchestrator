@@ -10283,9 +10283,7 @@ Formato esperado:
         <source>2FA (MFA)</source>
         <translation type="unfinished" />
     </message>
-    <message>
-
-This action CANNOT be undone. Are you sure?</source>
+    <message>    <source>This action CANNOT be undone. Are you sure?</source>
         <translation type="unfinished" />
     </message>
     <message>
