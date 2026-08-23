@@ -11687,7 +11687,7 @@ e.g. "Conduct a full investment analysis of NVDA: research fundamentals, assess 
         <translation type="unfinished" />
     </message>
     <message>
-Gives RD-Agent loops access to market data,
+        <source>Gives RD-Agent loops access to market data,
 financial news and economics tools.</source>
         <translation type="unfinished" />
     </message>
@@ -14593,7 +14593,7 @@ Sie können warten oder überspringen und mit eingeschränkter Funktionalität f
         <translation type="unfinished" />
     </message>
     <message>
-Create a real ticket and our team will respond within 24 hours.</source>
+        <source>Create a real ticket and our team will respond within 24 hours.</source>
         <translation type="unfinished" />
     </message>
     <message>
