@@ -37,7 +37,7 @@ void WhatsAppProvider::send(const NotificationRequest& req, std::function<void(b
     QJsonObject body;
     body["To"] = to_number_.startsWith("whatsapp:") ? to_number_ : "whatsapp:" + to_number_;
     body["From"] = from_number_.startsWith("whatsapp:") ? from_number_ : "whatsapp:" + from_number_;
-    body["Body"] = msg;
+    body["Body"] = req.message;
     // Basic auth encoded into URL for Twilio
     const QString auth_url = QString("https://%1:%2@api.twilio.com/2010-04-01/Accounts/%3/Messages.json")
                                  .arg(account_sid_, auth_token_, account_sid_);

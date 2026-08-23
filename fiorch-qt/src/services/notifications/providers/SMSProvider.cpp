@@ -32,6 +32,7 @@ void SMSProvider::send(const NotificationRequest& req, std::function<void(bool, 
     QJsonObject body;
     body["To"] = to_number_;
     body["From"] = from_number_;
+    body["Body"] = req.message;
 
     HttpClient::instance().post(url, body, [cb](Result<QJsonDocument> res) {
         if (res.is_err()) {
