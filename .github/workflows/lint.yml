@@ -153,3 +153,4 @@ jobs:
             -j "$(nproc)" \
             src 2>&1
           echo "cppcheck complete."
+# registered-via-push

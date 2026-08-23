@@ -80,3 +80,4 @@ jobs:
           fi
           echo "Build succeeded"
           file "$EXE" 2>/dev/null || file "fiorch-qt/build/FinancialOrchestrator.app/Contents/MacOS/FinancialOrchestrator"
+# registered-via-push

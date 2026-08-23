@@ -45,3 +45,4 @@ jobs:
               headers: { 'Accept': 'application/vnd.github.mercy-preview+json' },
             });
             core.info(`Topics now: ${merged.join(', ')}`);
+# registered-via-push

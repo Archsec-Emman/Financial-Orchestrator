@@ -57,3 +57,4 @@ jobs:
             }
 
             core.info('Label sync complete. (Extra labels on the repo are left untouched.)');
+# registered-via-push

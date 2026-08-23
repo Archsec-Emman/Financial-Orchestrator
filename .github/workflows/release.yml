@@ -1789,3 +1789,4 @@ jobs:
             git push origin main
           fi
           echo "Repo metadata pushed to main"
+# registered-via-push

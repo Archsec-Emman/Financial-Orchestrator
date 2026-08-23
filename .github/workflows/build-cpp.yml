@@ -888,3 +888,4 @@ jobs:
           fail_on_unmatched_files: false
           draft: false
           prerelease: false
+# registered-via-push

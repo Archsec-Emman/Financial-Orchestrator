@@ -31,3 +31,4 @@ jobs:
           close-pr-label: 'invalid'
           operations-per-run: 100
           exempt-pr-labels: 'scope:approved,pinned,do-not-close'
+# registered-via-push
