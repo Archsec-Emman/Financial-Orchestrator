@@ -167,6 +167,7 @@ AboutScreen::AboutScreen(QWidget* parent) : QWidget(parent) {
         pvl->addWidget(body);
 
         // Footer bar
+        auto* foot = new QLabel(tr("© 2026 Archsec-Emman — Financial Orchestrator %1").arg(FIORCH_VERSION_STRING));
         foot->setStyleSheet(QString("color: %1; font-size: 11px; background: %2; "
                                     "padding: 6px 14px; border-top: 1px solid %3; "
                                     "font-family: 'Consolas','Courier New',monospace;")
@@ -306,11 +307,14 @@ AboutScreen::AboutScreen(QWidget* parent) : QWidget(parent) {
         bvl->setContentsMargins(14, 10, 14, 12);
         bvl->setSpacing(6);
 
+        auto* desc = new QLabel(tr("Financial Orchestrator, the Financial Orchestrator logo, and the "
+                                   "fiorch name are trademarks of Archsec-Emman."));
         desc->setStyleSheet(BODY());
         desc->setWordWrap(true);
         bvl->addWidget(desc);
 
-        auto* perm =
+        auto* perm = new QLabel(tr("Use of these marks is governed by the project's trademark guidelines. "
+                                   "Refer to the repository for details."));
         perm->setStyleSheet(MUTED());
         perm->setWordWrap(true);
         bvl->addWidget(perm);
@@ -338,12 +342,12 @@ AboutScreen::AboutScreen(QWidget* parent) : QWidget(parent) {
             QString url;
         };
         const Link links[] = {
-            {"GitHub Repository", "https://github.com/Archsec-Emman/FinancialOrchestrator"},
-            {"License (AGPL-3.0)", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/LICENSE"},
-             "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/COMMERCIAL_LICENSE.md"},
-            {"Trademark Policy", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/TRADEMARK.md"},
-            {"Contributor CLA", "https://github.com/Archsec-Emman/FinancialOrchestrator/blob/main/docs/CLA.md"},
-            {"Official Website", "https://fincept.in"},
+            {"GitHub Repository", "https://github.com/Archsec-Emman/Financial-Orchestrator"},
+            {"License (MIT)", "https://github.com/Archsec-Emman/Financial-Orchestrator/blob/master/LICENSE"},
+            {"Issue Tracker", "https://github.com/Archsec-Emman/Financial-Orchestrator/issues"},
+            {"Releases", "https://github.com/Archsec-Emman/Financial-Orchestrator/releases"},
+            {"Discussions", "https://github.com/Archsec-Emman/Financial-Orchestrator/discussions"},
+            {"Documentation", "https://github.com/Archsec-Emman/Financial-Orchestrator/tree/master/docs"},
         };
 
         for (int i = 0; i < 6; ++i) {
