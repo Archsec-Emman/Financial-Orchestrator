@@ -151,6 +151,7 @@ QWidget* HelpScreen::build_page() {
                                  .arg(colors::AMBER(), MF));
         text_vl->addWidget(title);
 
+        auto* sub = new QLabel(tr("Guides, FAQs, and shortcuts for Financial Orchestrator"));
         sub->setStyleSheet(
             QString("color: %1; font-size: 12px; background: transparent; %2").arg(colors::TEXT_SECONDARY(), MF));
         text_vl->addWidget(sub);
@@ -302,6 +303,7 @@ QWidget* HelpScreen::build_page() {
                 "Upstox, Interactive Brokers, and more.")},
 
             {"🐍", tr("Why does Python install at first launch?"),
+             tr("Financial Orchestrator embeds Python for its analytics engine — it powers equity, "
                 "portfolio, derivatives, and quant analysis. The one-time install is ~150 MB and "
                 "happens automatically in the background.")},
 
