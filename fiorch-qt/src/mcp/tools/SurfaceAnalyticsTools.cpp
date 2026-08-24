@@ -187,6 +187,7 @@ template <typename SignalSig, typename KickFn, typename PayloadFn>
 void bridge_db_fetch(QPointer<QObject> holder_parent, ToolContext ctx,
                      std::shared_ptr<QPromise<ToolResult>> promise,
                      KickFn&& kick, SignalSig signal_member, PayloadFn&& payload_fn) {
+    (void)holder_parent;
     auto* svc = &DatabentoService::instance();
     AsyncDispatch::callback_to_promise(svc, std::move(ctx), promise,
         [svc, kick = std::forward<KickFn>(kick), signal_member,
@@ -360,6 +361,7 @@ std::vector<ToolDef> get_surface_analytics_tools() {
     // Generic single-arg fetch builder for surface_ready endpoints.
     auto make_db_surface_tool = [](const QString& name, const QString& desc,
                                     std::function<void(const QJsonObject&)> kick) {
+        (void)kick;
         ToolDef t;
         t.name = name;
         t.description = desc;
