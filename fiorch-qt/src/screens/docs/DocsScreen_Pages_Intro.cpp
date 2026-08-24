@@ -165,6 +165,7 @@ QWidget* DocsScreen::page_keyboard_shortcuts() {
                          {"GLOBAL SHORTCUTS", "F11  — Toggle fullscreen mode\n"
                                               "F10  — Toggle focus mode (hides tab bar and status bar)\n"
                                               "F5   — Refresh the current screen data\n"
+                                              "Ctrl+K — Command palette"},
                          {"FILE MENU", "New Workspace — Create a fresh workspace layout\n"
                                        "Open Workspace — Load a saved workspace\n"
                                        "Save Workspace — Persist current layout\n"
