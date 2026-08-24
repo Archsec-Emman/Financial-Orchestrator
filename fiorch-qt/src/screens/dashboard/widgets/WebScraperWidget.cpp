@@ -41,6 +41,8 @@ namespace {
 
 constexpr qsizetype kMaxRowsRendered = 5000; // safety cap for very large tables
 constexpr qsizetype kMaxHtmlBytes = 10 * 1024 * 1024;
+constexpr const char* kDefaultUA =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 // Decode common HTML entities + numeric char refs. Not exhaustive but covers
 // the overwhelming majority of real-world tables.
