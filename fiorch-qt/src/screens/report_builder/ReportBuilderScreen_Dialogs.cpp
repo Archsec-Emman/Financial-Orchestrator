@@ -412,7 +412,8 @@ void ReportBuilderScreen::on_new() {
 }
 
 void ReportBuilderScreen::on_open() {
-    QString path =
+    QString path = QFileDialog::getOpenFileName(this, "Open Report", QString(),
+                                                "Report Builder (*.fiorch);;JSON (*.json);;All Files (*)");
     if (path.isEmpty())
         return;
     auto r = Service::instance().load_from(path);
@@ -426,6 +427,7 @@ void ReportBuilderScreen::on_save() {
     QString path = svc.current_file();
     if (path.isEmpty()) {
         path = QFileDialog::getSaveFileName(this, "Save Report", svc.metadata().title,
+                                            "Report Builder (*.fiorch);;JSON (*.json);;All Files (*)");
         if (path.isEmpty())
             return;
     }
