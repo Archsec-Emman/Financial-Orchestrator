@@ -76,7 +76,7 @@ const QVector<ProviderDef>& provider_defs() {
           {"app_token",  "App Token",  "Application token", true}}},
         {"mattermost", "Mattermost", "🟦",
          {{"webhook_url", "Webhook URL", "https://your-mattermost.com/hooks/..."},
-          {"channel",     "Channel",     "#town-square (optional)"},
+          {"channel",     "Channel",     "#town-square (optional)"}}},
         {"teams", "MS Teams", "🟪",
          {{"webhook_url", "Webhook URL", "https://outlook.office.com/webhook/..."}}},
         {"webhook", "Webhook", "🌐",
