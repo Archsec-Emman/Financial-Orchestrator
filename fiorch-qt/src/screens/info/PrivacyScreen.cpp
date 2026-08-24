@@ -109,6 +109,7 @@ PrivacyScreen::PrivacyScreen(QWidget* parent) : QWidget(parent) {
     // 1 — Commitment
     pvl->addWidget(section_heading("#", "OUR COMMITMENT TO PRIVACY"));
     pvl->addWidget(
+        body_text("Your privacy matters to us. This policy explains "
                   "how we collect, use, and safeguard your personal information when you use Financial Orchestrator."));
 
     // 2 — Information We Collect

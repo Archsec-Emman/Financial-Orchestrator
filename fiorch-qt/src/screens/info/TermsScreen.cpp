@@ -123,6 +123,7 @@ TermsScreen::TermsScreen(QWidget* parent) : QWidget(parent) {
     // Section 7
     pvl->addWidget(section_heading("7", "DISCLAIMERS AND LIMITATIONS"));
     pvl->addWidget(
+        body_text("To the maximum extent permitted by law, Financial Orchestrator and its authors shall not "
                   "be liable for any indirect, incidental, special, or consequential damages. Financial data "
                   "and analytics are for informational purposes only and do not constitute investment advice."));
 
