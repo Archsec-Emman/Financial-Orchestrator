@@ -369,6 +369,8 @@ void AiChatScreen::update_stats() {
 
         // Display names
         const QString model_raw = llm.active_model();
+        const QString prov_display = is_fincept ? QStringLiteral("Fiorch") : provider_raw;
+        const QString model_display = is_fincept ? QStringLiteral("Fiorch LLM") : model_raw;
         // For fincept, don't expose internal model name
         QString model_short = model_display;
         if (model_short.length() > 24)

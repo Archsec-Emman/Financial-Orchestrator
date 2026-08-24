@@ -508,6 +508,7 @@ void AiChatBubble::on_send() {
     if (!ai_chat::LlmService::instance().is_configured()) {
         add_bubble("assistant",
                    "AI chat is not configured. Open **Settings → LLM Config** "
+                   "to add your API key.");
         return;
     }
 
