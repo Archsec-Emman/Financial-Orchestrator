@@ -459,6 +459,7 @@ void LlmConfigSection::load_providers() {
     if (result.is_ok()) {
         for (const auto& p : result.value()) {
             bool is_fincept = (p.provider.toLower() == "fiorch");
+            QString display = p.provider;
             if (p.is_active) {
                 display += "  ✓";
                 active_provider = p.provider;
@@ -592,7 +593,9 @@ void LlmConfigSection::populate_form(const QString& provider) {
     if (is_fincept) {
         auto stored = SettingsRepository::instance().get("fincept_api_key");
         if (stored.is_ok() && !stored.value().isEmpty())
+            api_key_edit_->setText(stored.value());
         else
+            api_key_edit_->setPlaceholderText("Enter your Fiorch API key");
         model_combo_->setVisible(false);
         fetch_btn_->setVisible(false);
         base_url_edit_->setVisible(false);
@@ -752,7 +755,9 @@ void LlmConfigSection::on_test_connection() {
     if (provider == "fiorch") {
         auto stored = SettingsRepository::instance().get("fincept_api_key");
         if (stored.is_ok() && !stored.value().isEmpty())
+            api_key_edit_->setText(stored.value());
         else
+            api_key_edit_->setPlaceholderText("Enter your Fiorch API key");
         return;
     }
 
