@@ -832,7 +832,8 @@ void ProfileScreen::show_delete_account_dialog() {
     // First confirmation
     auto first = QMessageBox::warning(
         this, tr("Delete Account"),
-           "This action CANNOT be undone. Are you sure?").arg(email),
+           tr("The account for %1 will be deleted. "
+              "This action CANNOT be undone. Are you sure?").arg(email),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (first != QMessageBox::Yes)
         return;
