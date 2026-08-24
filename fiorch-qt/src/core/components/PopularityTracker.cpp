@@ -4,6 +4,7 @@
 
 namespace fiorch {
 
+static constexpr const char* kOrg = "Archsec-Emman";
 static constexpr const char* kApp = "FinancialOrchestrator";
 static constexpr const char* kGroup = "component_usage";
 

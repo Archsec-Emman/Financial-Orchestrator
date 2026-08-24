@@ -96,7 +96,7 @@ class SessionManager : public QObject {
     QByteArray build_snapshot_payload_() const;
 
     QElapsedTimer elapsed_;
-    QSettings settings_;
+    mutable QSettings settings_;
 };
 
 } // namespace fiorch
