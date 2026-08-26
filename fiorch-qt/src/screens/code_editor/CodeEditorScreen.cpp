@@ -241,7 +241,7 @@ void CodeEditorScreen::on_new_notebook() {
     NotebookCell cell;
     cell.id = new_cell_id();
     cell.cell_type = "code";
-                  "# Write Python code and press Ctrl+Enter to run\n"
+    cell.source = "# Write Python code and press Ctrl+Enter to run\n"
                   "\n"
                   "print(\"Hello from Financial Orchestrator!\")";
     cells_.append(cell);
