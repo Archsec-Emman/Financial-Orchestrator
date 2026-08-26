@@ -179,6 +179,7 @@ static QVector<ConnectorConfig> market_configs() {
 
         {"fiorch",
          "fiorch",
+         "fiorch",
          Category::MarketData,
          "F",
          "#F58025",
