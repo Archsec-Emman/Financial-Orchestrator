@@ -216,8 +216,10 @@ QWidget* QuantModulePanel::build_rd_agent_tab(QComboBox* llm_combo) {
     auto* mcp_btn = new QPushButton(tr("MCP TOOLS"), status_bar);
     mcp_btn->setCursor(Qt::PointingHandCursor);
     mcp_btn->setCheckable(true);
-                        "Gives RD-Agent loops access to market data,\n"
-                        "financial news and economics tools."));
+    mcp_btn->setToolTip(
+        tr("Expose Financial Orchestrator data as MCP tools.\n"
+           "Gives RD-Agent loops access to market data,\n"
+           "financial news and economics tools."));
     mcp_btn->setStyleSheet(QString("QPushButton { background:transparent; color:%1; border:1px solid %1;"
                                    "font-family:%2; font-size:%3px; padding:2px 8px; border-radius:2px; }"
                                    "QPushButton:checked { background:%4; color:%5; border-color:%4; }"
