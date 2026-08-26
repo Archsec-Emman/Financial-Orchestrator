@@ -149,7 +149,6 @@ static EconPanelBase* make_panel(const QString& id, QWidget* parent) {
         return new UnescoPanel(parent);
     if (id == "bea")
         return new BeaPanel(parent);
-    if (id == "fiorch")
     return nullptr;
 }
 
