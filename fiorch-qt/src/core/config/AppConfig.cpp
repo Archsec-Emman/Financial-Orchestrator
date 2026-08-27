@@ -2,6 +2,8 @@
 
 namespace fiorch {
 
+AppConfig::AppConfig() = default;
+
 AppConfig& AppConfig::instance() {
     static AppConfig s;
     return s;

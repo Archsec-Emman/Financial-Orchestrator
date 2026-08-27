@@ -137,9 +137,11 @@ LlmResponse LlmService::fincept_async_request(const QString& user_message,
     const QString async_url   = "https://api.fiorch.in/research/llm/async";
     const QString status_base = "https://api.fiorch.in/research/llm/status/";
 
-                      .arg(async_url)
-                      .arg(api_key_.isEmpty() ? "EMPTY" : api_key_.left(12) + "...")
-                      .arg(prompt.length()));
+    LOG_INFO("fincept-async",
+             QString("Submitting: %1 key=%2 prompt_len=%3")
+                 .arg(async_url)
+                 .arg(api_key_.isEmpty() ? "EMPTY" : api_key_.left(12) + "...")
+                 .arg(prompt.length()));
 
     QByteArray json_data = QJsonDocument(submit_body).toJson(QJsonDocument::Compact);
     auto submit = eventloop_request("POST", async_url, json_data, hdr, 30000);
