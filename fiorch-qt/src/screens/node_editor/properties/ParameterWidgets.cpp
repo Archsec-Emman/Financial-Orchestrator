@@ -417,7 +417,10 @@ QWidget* ParameterWidgetFactory::create(const ParamDef& param, const QJsonValue&
         rl->addWidget(refresh_btn);
         layout->addWidget(row);
 
-        hint->setStyleSheet(QString("color:%1; font-family:Consolas; font-size:10px;").arg(ui::colors::TEXT_TERTIARY()));
+        auto* hint = new QLabel(
+            "Leave blank to use the default tool assigned to this node");
+        hint->setStyleSheet(
+            QString("color:%1; font-family:Consolas; font-size:10px;").arg(ui::colors::TEXT_TERTIARY()));
         hint->setWordWrap(true);
         layout->addWidget(hint);
 
