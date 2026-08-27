@@ -6,8 +6,11 @@
 
 namespace fiorch::screens {
 
+class FinceptMacroPanel : public EconPanelBase {
     Q_OBJECT
   public:
+    explicit FinceptMacroPanel(QWidget* parent = nullptr);
+
     void activate() override;
 
   protected:

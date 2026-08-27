@@ -44,9 +44,6 @@ QString format_price(double p) {
     return QStringLiteral("%1").arg(QLocale::system().toString(p, 'f', 2));
 }
 
-    auto* base = pr::PredictionExchangeRegistry::instance().adapter(
-        QStringLiteral("fiorch"));
-}
 
 } // namespace
 

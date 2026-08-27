@@ -42,6 +42,8 @@ jobs:
             exe: FinancialOrchestrator
             qt_arch: linux_gcc_64
             cmake_extra: ""
+            # Ninja keep-going: collect errors from every TU, not just the first
+            keepgoing: "-k 0"
 
           # ---- macOS ARM64 (Apple Silicon) ----
           - os: macos-15
@@ -196,7 +198,7 @@ jobs:
       - name: Build
         shell: bash
         working-directory: fiorch-qt
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 3)
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 3) -- ${{ matrix.keepgoing }}
 
       # ---- Verify binary ----
       - name: Verify build output
