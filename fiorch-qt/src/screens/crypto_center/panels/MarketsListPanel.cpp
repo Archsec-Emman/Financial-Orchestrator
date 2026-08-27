@@ -165,7 +165,6 @@ void MarketsListPanel::showEvent(QShowEvent* e) {
     if (!adapter) {
         return;
     }
-    set_status_demo(adapter->is_demo_mode());
     connect(adapter,
             &fiorch::services::prediction::PredictionExchangeAdapter::markets_ready,
             this, &MarketsListPanel::on_markets_ready);
