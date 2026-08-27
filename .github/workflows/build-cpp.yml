@@ -694,8 +694,13 @@ jobs:
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
+            --desktop-file AppDir/usr/share/applications/fiorch-terminal.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/fiorch-terminal.png \
             --output appimage \
-            2>&1 || true
+            > linuxdeploy.log 2>&1
+          echo "::group::linuxdeploy output"
+          cat linuxdeploy.log || true
+          echo "::endgroup::"
 
           # Verify AppImage was created
           if [ ! -f "$OUTPUT" ]; then
