@@ -364,7 +364,7 @@ void BuybackBurnPanel::on_topic_error(const QString& topic, const QString& error
 }
 
 void BuybackBurnPanel::on_burn_signature_clicked() {
-    if (current_burn_signature_.isEmpty()) return;
+    if (current_burn_signature_.isEmpty()
         || current_burn_signature_.contains(QStringLiteral("Mock"))) {
         // Mock signature — Solscan would 404. Skip the navigation and
         // give a tooltip cue.
