@@ -660,6 +660,7 @@ WindowFrame::WindowFrame(int window_id, QWidget* parent, const WindowId& adopted
         } else if (action == "import_data") {
             QString path = QFileDialog::getOpenFileName(
                 this, tr("Import Layout"), QDir::homePath(),
+                tr("Layout Files (*.json *.fiorch);;All Files (*)"));
             if (!path.isEmpty()) {
                 auto r = LayoutCatalog::instance().import_from(path);
                 if (r.is_err())
@@ -675,6 +676,7 @@ WindowFrame::WindowFrame(int window_id, QWidget* parent, const WindowId& adopted
             } else {
                 QString path = QFileDialog::getSaveFileName(
                     this, tr("Export Layout"), QDir::homePath(),
+                    tr("Layout Files (*.fiorch);;All Files (*)"));
                 if (!path.isEmpty()) {
                     auto r = LayoutCatalog::instance().export_to(cur_id, path);
                     if (r.is_err())

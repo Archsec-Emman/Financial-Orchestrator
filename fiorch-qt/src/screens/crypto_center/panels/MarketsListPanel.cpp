@@ -44,6 +44,9 @@ QString format_price(double p) {
     return QStringLiteral("%1").arg(QLocale::system().toString(p, 'f', 2));
 }
 
+pr::PredictionExchangeAdapter* fincept_adapter() {
+    return pr::PredictionExchangeRegistry::instance().adapter(QStringLiteral("fincept"));
+}
 
 } // namespace
 
