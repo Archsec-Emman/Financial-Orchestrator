@@ -126,43 +126,6 @@ namespace fiorch::screens {
 
 using namespace fiorch::ui;
 
-// ── Field factory helpers ────────────────────────────────────────────────────
-
-
-static AltField text_field(const QString& key, const QString& label, const QString& def = "") {
-    AltField f;
-    f.key = key;
-    f.label = label;
-    f.type = AltField::Text;
-    f.combo_items = def;
-    return f;
-}
-
-static AltField spin_field(const QString& key, const QString& label, double def, double min_v, double max_v,
-                           int dec = 2, const QString& pfx = "", const QString& sfx = "", bool div100 = false) {
-    AltField f;
-    f.key = key;
-    f.label = label;
-    f.type = AltField::Spin;
-    f.default_val = def;
-    f.min_val = min_v;
-    f.max_val = max_v;
-    f.decimals = dec;
-    f.prefix = pfx;
-    f.suffix = sfx;
-    f.divide_100 = div100;
-    return f;
-}
-
-static AltField combo_field(const QString& key, const QString& label, const QString& items) {
-    AltField f;
-    f.key = key;
-    f.label = label;
-    f.type = AltField::Combo;
-    f.combo_items = items;
-    return f;
-}
-
 // ── Category definitions ─────────────────────────────────────────────────────
 
 static QList<AltCategory> build_categories() {
