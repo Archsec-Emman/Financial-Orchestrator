@@ -556,7 +556,7 @@ jobs:
           # ── Stage resources INSIDE the bundle (not as siblings) ───────────
           mkdir -p "${APP_BUNDLE}/Contents/Resources"
           cp -r resources "${APP_BUNDLE}/Contents/Resources/" 2>/dev/null || true
-          bash .github/scripts/sync_scripts.sh scripts "${APP_BUNDLE}/Contents/Resources/scripts"
+          bash ../.github/scripts/sync_scripts.sh scripts "${APP_BUNDLE}/Contents/Resources/scripts"
 
           # ── Embed Python.framework (tag builds only — skip on push) ───────
           if [ "$IS_TAG" = "true" ]; then
@@ -643,7 +643,7 @@ jobs:
 
           # Copy resources and scripts inside AppDir
           cp -r resources AppDir/usr/bin/resources 2>/dev/null || true
-          bash .github/scripts/sync_scripts.sh scripts AppDir/usr/bin/scripts
+          bash ../.github/scripts/sync_scripts.sh scripts AppDir/usr/bin/scripts
 
           # Desktop entry (required by linuxdeploy)
           cat > AppDir/usr/share/applications/fiorch-terminal.desktop <<'EOF'
@@ -804,7 +804,7 @@ jobs:
           lipo -create "$ARM64_BIN" "$X64_BIN" -output dist/FinancialOrchestrator
           chmod +x dist/FinancialOrchestrator
           cp -r arm64/resources dist/resources 2>/dev/null || true
-          bash .github/scripts/sync_scripts.sh arm64/scripts dist/scripts
+          bash ../.github/scripts/sync_scripts.sh arm64/scripts dist/scripts
           file dist/FinancialOrchestrator
           lipo -info dist/FinancialOrchestrator
           ls -lh dist/FinancialOrchestrator
