@@ -498,7 +498,7 @@ jobs:
           # Copy app resources and Python analytics scripts
           # ----------------------------------------------------------------
           cp -r resources dist/resources 2>/dev/null || true
-          bash .github/scripts/sync_scripts.sh scripts dist/scripts
+          bash ../.github/scripts/sync_scripts.sh scripts dist/scripts
 
           # ----------------------------------------------------------------
           # Final diagnostic — list everything that will be zipped
