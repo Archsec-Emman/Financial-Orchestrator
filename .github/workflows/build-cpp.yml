@@ -661,6 +661,7 @@ jobs:
           # missing-font fallbacks produced zero-byte PNGs that failed libpng's
           # CRC check in linuxdeploy. `python3 -c` sidesteps the YAML-indented
           # heredoc trap (Python rejects the leading spaces as IndentationError).
+          pip install -q pillow
           ICON_DEST="AppDir/usr/share/icons/hicolor/256x256/apps/fiorch-terminal.png"
           if [ -f "resources/icons/app_icon_256.png" ]; then
             cp resources/icons/app_icon_256.png "${ICON_DEST}"
