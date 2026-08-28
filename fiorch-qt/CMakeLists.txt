@@ -2290,6 +2290,12 @@ endif()
 
 add_executable(FinancialOrchestrator ${_FIORCH_EXE_FLAGS}
     ${CORE_SOURCES}
+)
+
+# Disable unity build on Windows to avoid PCH mismatch with ClangCL cross-compile
+if (WIN32)
+    set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
+endif()
     ${NETWORK_SOURCES}
     ${DATAHUB_SOURCES}
     ${AUTH_SOURCES}
