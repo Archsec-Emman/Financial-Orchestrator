@@ -372,9 +372,10 @@ void NewsService::analyze_article(const QString& url, AnalysisCallback cb) {
     QJsonObject body;
     body["url"] = url;
 
-    // context = `this` ensures the callback drops if NewsService ever stops
-    // being a singleton — today it always outlives the request.
-    HttpClient::instance().post("/news/analyze", body, [this, cb](Result<QJsonDocument> result) {
+    // The callback uses only `cb` and `result`; no `this` capture needed.
+    // If NewsService lifecycle ever needs to gate the callback, capture `this`
+    // and reference it inside the lambda (e.g. via a member flag).
+    HttpClient::instance().post("/news/analyze", body, [cb](Result<QJsonDocument> result) {
         if (result.is_err()) {
             LOG_ERROR("NewsService", "Analysis failed: " + QString::fromStdString(result.error()));
             cb(false, {});

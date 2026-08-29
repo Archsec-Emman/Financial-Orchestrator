@@ -51,6 +51,16 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# Clang emits -Wc++98-compat warnings by default which fail with -Werror.
+# Our code uses C++20 features (rvalue refs, trailing return types, decltype,
+# initializer lists, etc.) which are all incompatible with C++98. Disable the
+# warning explicitly since CMAKE_CXX_STANDARD=20 doesn't suppress it.
+# Also disable -Wunused-lambda-capture — too many lambdas capture `this` for
+# future-use scaffolding; the warning is noise at -Werror level.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    add_compile_options(-Wno-c++98-compat -Wno-unused-lambda-capture)
+endif()
+
 # ── Pinned toolchain enforcement ─────────────────────────────────────────────
 # Financial Orchestrator ships on 3 platforms and cannot tolerate compiler-version
 # drift. These checks fail the build early with an actionable message rather
