@@ -2318,8 +2318,19 @@ add_executable(FinancialOrchestrator ${_FIORCH_EXE_FLAGS}
 )
 
 # Disable unity build on Windows to avoid PCH mismatch with ClangCL cross-compile
+# Also suppress Clang warnings that flag C++20 features as "incompatible with
+# C++98" (the standard is set to 20 but Clang still warns by default).
 if (WIN32)
     set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+        target_compile_options(FinancialOrchestrator PRIVATE
+            -Wno-c++98-compat
+            -Wno-c++98-compat-pedantic
+            -Wno-unused-lambda-capture
+            -Wno-exit-time-destructors
+            -Wno-shorten-64-to-32
+        )
+    endif()
 endif()
 
 target_include_directories(FinancialOrchestrator PRIVATE

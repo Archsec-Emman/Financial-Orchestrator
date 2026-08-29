@@ -429,7 +429,7 @@ QWidget* ProfileScreen::build_security() {
         if (!key.isEmpty()) {
             QApplication::clipboard()->setText(key);
             cb->setText(tr("COPIED"));
-            QTimer::singleShot(1500, cb, [this, cb]() { cb->setText(tr("COPY")); });
+            QTimer::singleShot(1500, cb, [cb]() { cb->setText(tr("COPY")); });
         }
     });
     krl->addWidget(cb);
