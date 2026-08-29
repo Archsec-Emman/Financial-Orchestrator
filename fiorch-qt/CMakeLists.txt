@@ -2290,12 +2290,6 @@ endif()
 
 add_executable(FinancialOrchestrator ${_FIORCH_EXE_FLAGS}
     ${CORE_SOURCES}
-)
-
-# Disable unity build on Windows to avoid PCH mismatch with ClangCL cross-compile
-if (WIN32)
-    set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
-endif()
     ${NETWORK_SOURCES}
     ${DATAHUB_SOURCES}
     ${AUTH_SOURCES}
@@ -2312,6 +2306,11 @@ endif()
     src/services/updater/UpdateService.cpp
     ${_FIORCH_PLATFORM_SOURCES}
 )
+
+# Disable unity build on Windows to avoid PCH mismatch with ClangCL cross-compile
+if (WIN32)
+    set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
+endif()
 
 target_include_directories(FinancialOrchestrator PRIVATE
     src
