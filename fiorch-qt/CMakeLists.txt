@@ -2322,24 +2322,26 @@ add_executable(FinancialOrchestrator ${_FIORCH_EXE_FLAGS}
 # C++98" (the standard is set to 20 but Clang still warns by default).
 if (WIN32)
     set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-        target_compile_options(FinancialOrchestrator PRIVATE
-            -Wno-c++98-compat
-            -Wno-c++98-compat-pedantic
-            -Wno-c++20-compat
-            -Wno-unused-lambda-capture
-            -Wno-exit-time-destructors
-            -Wno-shorten-64-to-32
-            -Wno-switch-default
-            -Wno-zero-as-null-pointer-constant
-            -Wno-documentation
-            -Wno-unsafe-buffer-usage
-            -Wno-deprecated-declarations
-            -Wno-deprecated-anon-enum-enum-conversion
-            -Wno-deprecated-enum-enum-conversion
-            -Wno-unused-but-set-variable
-        )
-    endif()
+endif()
+
+# Clang/AppleClang warnings we don't care about (applies to all platforms)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    target_compile_options(FinancialOrchestrator PRIVATE
+        -Wno-c++98-compat
+        -Wno-c++98-compat-pedantic
+        -Wno-c++20-compat
+        -Wno-unused-lambda-capture
+        -Wno-exit-time-destructors
+        -Wno-shorten-64-to-32
+        -Wno-switch-default
+        -Wno-zero-as-null-pointer-constant
+        -Wno-documentation
+        -Wno-unsafe-buffer-usage
+        -Wno-deprecated-declarations
+        -Wno-deprecated-anon-enum-enum-conversion
+        -Wno-deprecated-enum-enum-conversion
+        -Wno-unused-but-set-variable
+    )
 endif()
 
 target_include_directories(FinancialOrchestrator PRIVATE
