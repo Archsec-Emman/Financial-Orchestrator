@@ -6,16 +6,20 @@
 #include <QObject>
 #include <QPointer>
 #include <QMetaType>
+#include <QWidget>
 
 #include <DockManager.h>
 #include <DockWidget.h>
 #include <functional>
 
 // Workaround for Qt 6.8 + MSVC + qtads: qpointer.h's static_cast<T*>(T*)
-// fails for T=ads::CDockWidget because the class has a complex inheritance
-// graph that confuses MSVC's strict mode. Registering the metatype tells
-// the compiler that CDockWidget* is a valid QObject-derived type.
+// fails for T=ads::CDockWidget because MSVC's strict mode (/permissive-)
+// doesn't see the QWidget→QObject inheritance at the point of the cast.
+// Q_DECLARE_METATYPE registers the type with the Qt meta-object system,
+// which forces the compiler to consider it a proper QObject subclass.
 Q_DECLARE_METATYPE(ads::CDockWidget*)
+// Also forward-declare the full type with its known base to help the compiler.
+namespace ads { class CDockWidget; }
 
 namespace fiorch::ui {
 class GroupBadge;
