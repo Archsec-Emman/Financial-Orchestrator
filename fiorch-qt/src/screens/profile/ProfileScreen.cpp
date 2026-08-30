@@ -424,7 +424,7 @@ QWidget* ProfileScreen::build_security() {
         QString("QPushButton{background:%1;color:%2;border:1px solid %3;padding:0 10px;"
                 "font-size:10px;font-weight:700;font-family:'Consolas',monospace;}QPushButton:hover{color:%4;}")
             .arg(ui::colors::BG_RAISED(), ui::colors::TEXT_SECONDARY(), ui::colors::BORDER_DIM(), ui::colors::TEXT_PRIMARY()));
-    connect(cb, &QPushButton::clicked, this, [this, cb]() {
+    connect(cb, &QPushButton::clicked, this, [cb]() {
         auto key = auth::AuthManager::instance().session().api_key;
         if (!key.isEmpty()) {
             QApplication::clipboard()->setText(key);

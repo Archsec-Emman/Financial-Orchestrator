@@ -2326,9 +2326,18 @@ if (WIN32)
         target_compile_options(FinancialOrchestrator PRIVATE
             -Wno-c++98-compat
             -Wno-c++98-compat-pedantic
+            -Wno-c++20-compat
             -Wno-unused-lambda-capture
             -Wno-exit-time-destructors
             -Wno-shorten-64-to-32
+            -Wno-switch-default
+            -Wno-zero-as-null-pointer-constant
+            -Wno-documentation
+            -Wno-unsafe-buffer-usage
+            -Wno-deprecated-declarations
+            -Wno-deprecated-anon-enum-enum-conversion
+            -Wno-deprecated-enum-enum-conversion
+            -Wno-unused-but-set-variable
         )
     endif()
 endif()
