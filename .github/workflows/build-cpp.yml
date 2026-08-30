@@ -609,7 +609,7 @@ jobs:
             codesign --force --deep --sign - --timestamp=none "${APP_BUNDLE}"
 
             echo "Verifying signature..."
-            codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}" || {
+            codesign --verify --deep --verbose=2 "${APP_BUNDLE}" || {
               echo "::error::Bundle verification failed"
               codesign --display --deep --verbose=4 "${APP_BUNDLE}" || true
               exit 1

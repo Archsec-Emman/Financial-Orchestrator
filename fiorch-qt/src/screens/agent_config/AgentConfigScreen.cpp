@@ -65,9 +65,9 @@ AgentConfigScreen::AgentConfigScreen(QWidget* parent) : QWidget(parent) {
         agentic_mode_enabled_ = r.is_ok() && r.value() == QStringLiteral("true");
     }
     connect(&fiorch::EventBus::instance(), &fiorch::EventBus::eventPublished, this,
-            [this](const QString& event, const QVariantMap& data) {
+            [this](const QString& event, const QVariantMap& payload) {
                 if (event == QStringLiteral("settings.agentic_mode_changed")) {
-                    agentic_mode_enabled_ = data.value("enabled").toBool();
+                    agentic_mode_enabled_ = payload.value("enabled").toBool();
                     apply_agentic_visibility();
                 }
             });

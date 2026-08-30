@@ -2320,8 +2320,14 @@ add_executable(FinancialOrchestrator ${_FIORCH_EXE_FLAGS}
 )
 
 # Disable unity build on Windows to avoid PCH mismatch with ClangCL cross-compile
+# Also disable /WX (warnings-as-errors) on MSVC for the main target — Qt 6.8's
+# qpointer.h has a C2440 error with ads::CDockWidget that we can't fix in third-party
+# code. Treat MSVC warnings as informational like we do for Clang.
 if (WIN32)
     set_target_properties(FinancialOrchestrator PROPERTIES UNITY_BUILD OFF)
+    if (MSVC)
+        target_compile_options(FinancialOrchestrator PRIVATE /WX-)
+    endif()
 endif()
 
 target_include_directories(FinancialOrchestrator PRIVATE

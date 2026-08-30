@@ -441,8 +441,8 @@ std::vector<ToolDef> get_dashboard_tools() {
                     // After load_layout, apply config to the live widget.
                     if (!cfg.isEmpty()) {
                         if (auto* tile = find_tile_by_instance_id(canvas, new_id)) {
-                            if (auto* w = tile->content_widget())
-                                w->apply_config(cfg);
+                            if (auto* content = tile->content_widget())
+                                content->apply_config(cfg);
                         }
                     }
                 }
