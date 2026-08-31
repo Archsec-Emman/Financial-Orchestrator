@@ -120,8 +120,13 @@ jobs:
           set -euo pipefail
           VCPKG_ROOT="${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}"
           echo "Using vcpkg at: $VCPKG_ROOT"
-          "$VCPKG_ROOT/vcpkg" install openssl:x64-windows --no-print-usage
-          OPENSSL_DIR="$VCPKG_ROOT/installed/x64-windows"
+          # Pick the vcpkg triplet matching the target architecture. Using the
+          # x64 triplet for the ARM64 cross-build produces x86_64 .lib files
+          # that fail at link time with a mismatched-architecture error.
+          VCPKG_TRIPLE="${{ matrix.arch == 'arm64' && 'arm64-windows' || 'x64-windows' }}"
+          echo "vcpkg triplet: $VCPKG_TRIPLE"
+          "$VCPKG_ROOT/vcpkg" install "openssl:${VCPKG_TRIPLE}" --no-print-usage
+          OPENSSL_DIR="$VCPKG_ROOT/installed/${VCPKG_TRIPLE}"
           echo "OPENSSL_ROOT_DIR=$OPENSSL_DIR" >> "$GITHUB_ENV"
           echo "OpenSSL installed at: $OPENSSL_DIR"
           ls "$OPENSSL_DIR/lib/libcrypto.lib" && echo "libcrypto.lib confirmed"
@@ -148,6 +153,35 @@ jobs:
           cache: true
           set-env: false
           dir: "${{ runner.temp }}/qt-host"
+
+      # ---- OpenSSL for macOS x64 cross-compile ----
+      # macOS-15 runners are Apple Silicon, where Homebrew's OpenSSL is arm64-only.
+      # A cross-compiled x86_64 app therefore links against arm64 .dylibs and the
+      # linker rejects the architecture mismatch. Build an x86_64 OpenSSL from
+      # source into $RUNNER_TEMP and point CMake at it for the x64 job only.
+      - name: Build OpenSSL x86_64 (macOS x64 only)
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPENSSL_VERSION="3.3.2"
+          PREFIX="$RUNNER_TEMP/openssl-x86_64"
+          WORKDIR="$RUNNER_TEMP/openssl-src"
+          rm -rf "$WORKDIR" "$PREFIX"
+          mkdir -p "$WORKDIR"
+          curl -fsSL "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+            | tar -xz -C "$WORKDIR"
+          pushd "$WORKDIR/openssl-${OPENSSL_VERSION}"
+          # darwin64-x86_64 produces an x86_64 build even on an Apple Silicon host.
+          ./Configure darwin64-x86_64 shared \
+            --prefix="$PREFIX" \
+            --openssldir="$PREFIX/ssl"
+          make -j"$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
+          make install_sw
+          popd
+          echo "OPENSSL_ROOT_DIR=$PREFIX" >> "$GITHUB_ENV"
+          echo "x86_64 OpenSSL installed at: $PREFIX"
+          file "$PREFIX/lib/libssl.dylib"
 
       # ---- Configure CMake ----
       - name: Configure CMake (Linux)
