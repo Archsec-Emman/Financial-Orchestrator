@@ -576,7 +576,7 @@ set(QT_VERSION_MAJOR 6 CACHE STRING "" FORCE)
 FetchContent_Declare(
     QtADS
     GIT_REPOSITORY https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System.git
-    GIT_TAG        master
+    GIT_TAG        87cffe5d40307c61141c88b88c10c5e7d181d880  # 4.5.0
     GIT_SHALLOW    TRUE
     UPDATE_DISCONNECTED TRUE
 )
